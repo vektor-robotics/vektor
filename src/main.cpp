@@ -1,5 +1,6 @@
 #include "vektor/agent.hpp"
 #include "vektor/config.hpp"
+#include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
 #include "vektor/reporter.hpp"
 #include "vektor/status.hpp"
@@ -13,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 struct CliOptions {
@@ -29,6 +31,8 @@ struct CliOptions {
   std::optional<std::filesystem::path> tls_certificate;
   std::optional<std::filesystem::path> tls_private_key;
   std::optional<std::filesystem::path> tls_client_ca;
+  std::vector<std::string> selectors;
+  std::optional<std::size_t> limit;
 };
 
 [[noreturn]] void usage_error(const std::string &message = {}) {
@@ -45,7 +49,11 @@ struct CliOptions {
             << "                [--listen <host:port>] "
                "[--history <path>|--no-history]\n"
             << "                (--tls-cert <path> --tls-key <path> "
-               "--tls-ca <path>|--insecure)\n";
+               "--tls-ca <path>|--insecure)\n"
+            << "  vektor fleet  --config <path> [--format text|json] "
+               "[--selector key=value]...\n"
+            << "                [--limit <count>] [--watch] "
+               "[--interval-ms <ms>]\n";
   throw std::invalid_argument("invalid command line");
 }
 
@@ -62,7 +70,7 @@ CliOptions parse_cli(int argc, char **argv) {
   CliOptions options;
   options.command = argv[1];
   if (options.command != "check" && options.command != "status" &&
-      options.command != "agent")
+      options.command != "agent" && options.command != "fleet")
     usage_error("unknown command '" + options.command + "'");
 
   for (int index = 2; index < argc; ++index) {
@@ -78,7 +86,11 @@ CliOptions parse_cli(int argc, char **argv) {
     else if (argument == "--interval-ms") {
       const auto value = next_value(index, argc, argv, argument);
       try {
-        options.interval = std::chrono::milliseconds(std::stoll(value));
+        std::size_t consumed = 0;
+        const auto parsed = std::stoll(value, &consumed);
+        if (consumed != value.size())
+          throw std::invalid_argument("trailing characters");
+        options.interval = std::chrono::milliseconds(parsed);
       } catch (const std::exception &) {
         usage_error("invalid value for --interval-ms");
       }
@@ -98,7 +110,24 @@ CliOptions parse_cli(int argc, char **argv) {
       options.tls_private_key = next_value(index, argc, argv, argument);
     else if (argument == "--tls-ca")
       options.tls_client_ca = next_value(index, argc, argv, argument);
-    else
+    else if (argument == "--selector")
+      options.selectors.push_back(next_value(index, argc, argv, argument));
+    else if (argument == "--limit") {
+      const auto value = next_value(index, argc, argv, argument);
+      try {
+        if (value.empty() || value.front() == '-')
+          throw std::invalid_argument("not an unsigned integer");
+        std::size_t consumed = 0;
+        const auto parsed = std::stoull(value, &consumed);
+        if (consumed != value.size())
+          throw std::invalid_argument("trailing characters");
+        options.limit = static_cast<std::size_t>(parsed);
+      } catch (const std::exception &) {
+        usage_error("invalid value for --limit");
+      }
+      if (*options.limit == 0)
+        usage_error("--limit must be greater than zero");
+    } else
       usage_error("unknown option '" + argument + "'");
   }
 
@@ -110,14 +139,23 @@ CliOptions parse_cli(int argc, char **argv) {
       (options.watch || !options.robot_id.empty() || options.history_path ||
        !options.history || options.insecure || options.tls_certificate ||
        options.tls_private_key || options.tls_client_ca ||
-       options.listen_address != "127.0.0.1:50051"))
+       options.listen_address != "127.0.0.1:50051" ||
+       !options.selectors.empty() || options.limit))
     usage_error("status-only option used with check");
   if (options.command == "status" &&
       (options.insecure || options.tls_certificate || options.tls_private_key ||
-       options.tls_client_ca || options.listen_address != "127.0.0.1:50051"))
+       options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
+       !options.selectors.empty() || options.limit))
     usage_error("agent-only option used with status");
-  if (options.command == "agent" && (options.watch || options.format != "text"))
+  if (options.command == "agent" &&
+      (options.watch || options.format != "text" ||
+       !options.selectors.empty() || options.limit))
     usage_error("status-only option used with agent");
+  if (options.command == "fleet" &&
+      (!options.robot_id.empty() || options.history_path || !options.history ||
+       options.insecure || options.tls_certificate || options.tls_private_key ||
+       options.tls_client_ca || options.listen_address != "127.0.0.1:50051"))
+    usage_error("option is not supported by fleet");
   return options;
 }
 
@@ -188,18 +226,52 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   return vektor::AgentRunner(node, config, robot_id, std::move(agent_options))
       .run();
 }
+
+int run_fleet(const CliOptions &options, const vektor::FleetConfig &config) {
+  std::vector<vektor::LabelSelector> selectors;
+  selectors.reserve(options.selectors.size());
+  for (const auto &selector : options.selectors)
+    selectors.push_back(vektor::parse_label_selector(selector));
+
+  int exit_code = 0;
+  bool first = true;
+  do {
+    const auto report = vektor::poll_fleet(config, selectors, options.limit);
+    if (!first && options.format == "text")
+      std::cout << "\n---\n\n";
+    if (options.format == "json")
+      std::cout << vektor::fleet_report_to_json(report) << '\n';
+    else
+      vektor::print_fleet_report(report, std::cout);
+    std::cout.flush();
+    first = false;
+    exit_code = report.state == vektor::HealthState::Healthy ||
+                        report.state == vektor::HealthState::Degraded
+                    ? 0
+                    : 1;
+    if (options.watch && rclcpp::ok())
+      std::this_thread::sleep_for(options.interval);
+  } while (options.watch && rclcpp::ok());
+  return exit_code;
+}
 } // namespace
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   try {
     const auto options = parse_cli(argc, argv);
-    const auto config = vektor::load_config(options.config_path);
-    auto node = std::make_shared<rclcpp::Node>("vektor_" + options.command);
-    const int exit_code =
-        options.command == "check"    ? run_check(options, config, node)
-        : options.command == "status" ? run_status(options, config, node)
-                                      : run_agent(options, config, node);
+    int exit_code = 0;
+    if (options.command == "fleet") {
+      exit_code =
+          run_fleet(options, vektor::load_fleet_config(options.config_path));
+    } else {
+      const auto config = vektor::load_config(options.config_path);
+      auto node = std::make_shared<rclcpp::Node>("vektor_" + options.command);
+      exit_code = options.command == "check" ? run_check(options, config, node)
+                  : options.command == "status"
+                      ? run_status(options, config, node)
+                      : run_agent(options, config, node);
+    }
     rclcpp::shutdown();
     return exit_code;
   } catch (const std::invalid_argument &error) {

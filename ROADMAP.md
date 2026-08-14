@@ -24,6 +24,12 @@ mutual authentication and offline-safe local operation.
 
 Fleet inventory, labels, health aggregation, and staged target selection.
 
+- Strict YAML inventory and shared transport policy
+- Concurrent gRPC status collection with deadlines
+- Label selectors and deterministic target limits
+- Aggregate health with identity-mismatch detection
+- Text, JSON, and watch output
+
 ## v0.5 — Deploy
 
 OCI artifact delivery, health-gated rollout waves, promotion, pause, and automatic
