@@ -342,7 +342,9 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     return {robot.id, false, "invalid deployment response from agent"};
   if (action == RpcAction::Prepare &&
       response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_STAGED)
-    return {robot.id, false, "agent did not stage the deployment"};
+    return {robot.id, false, "agent did not stage the deployment",
+            response_phase_name(response.phase()),
+            response_operation_name(response.reconciliation_operation())};
   if ((action == RpcAction::Activate || action == RpcAction::Observe) &&
       (response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE ||
        response.artifact() != rollout.artifact ||
@@ -353,10 +355,14 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
            workload_fingerprint(rollout.workload) ||
        !response.runtime_running() || !response.runtime_ready() ||
        !response.runtime_managed() || response.drift_detected()))
-    return {robot.id, false, "desired and observed runtime state do not match"};
+    return {robot.id, false, "desired and observed runtime state do not match",
+            response_phase_name(response.phase()),
+            response_operation_name(response.reconciliation_operation())};
   if (action == RpcAction::Rollback &&
       response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_ROLLED_BACK)
-    return {robot.id, false, "agent did not complete rollback"};
+    return {robot.id, false, "agent did not complete rollback",
+            response_phase_name(response.phase()),
+            response_operation_name(response.reconciliation_operation())};
   auto message = response.message();
   if (action == RpcAction::Activate || action == RpcAction::Observe)
     message += "; observed " + response.observed_artifact() + " as " +

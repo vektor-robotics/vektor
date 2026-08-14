@@ -296,11 +296,12 @@ colcon test-result --verbose
 ## Roadmap
 
 Milestones 1–5 provide checks, status snapshots, the mutually authenticated
-machine agent, fleet aggregation, and health-gated OCI rollouts. The current
-focus is v0.6 Reconcile: applying the desired artifact to the actual machine
+machine agent, fleet aggregation, and health-gated OCI rollouts. VEKTOR has now
+completed v0.6 Reconcile: applying the desired artifact to the actual machine
 runtime, verifying the observed digest and health, detecting drift, and safely
-recovering or rolling back after failures. Artifact trust, audit, access control,
-and production hardening follow in v0.7–v0.9. See `ROADMAP.md`.
+recovering or rolling back after failures. The current focus is v0.7 Trust:
+artifact identity, policy enforcement, provenance, and auditability. Access
+control and production hardening follow in v0.8–v0.9. See `ROADMAP.md`.
 
 ## Contributing and security
 

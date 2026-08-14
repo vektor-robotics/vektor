@@ -21,6 +21,8 @@ All notable changes to VEKTOR are documented here.
 - Restart recovery for interrupted prepare, activation, and rollback operations
   without silently promoting an interrupted activation.
 - Rollout JSON schema v2 with per-robot phase and operation fields.
+- Deterministic two-robot integration coverage for runtime timeout, interrupted
+  activation recovery, manually introduced drift, and reverse-order rollback.
 
 ## [0.5.0] - 2026-08-14
 

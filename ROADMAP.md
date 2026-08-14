@@ -48,7 +48,7 @@ rollback.
 - Automatic rollback on preparation, activation, or health-gate failure
 - Operator-triggered fleet rollback in reverse application order
 
-## Current focus
+## Completed milestone
 
 ### v0.6 — Reconcile
 
@@ -65,13 +65,17 @@ gap in the current deployment path.
 - [x] Detect drift between desired and observed runtime state
 - [x] Recheck observed state after agent restart without unintended promotion
 - [x] Add explicit reconciliation progress and failures to operator CLI output
-- [ ] Complete integration coverage for timeout, crash recovery, drift, and rollback
+- [x] Complete integration coverage for timeout, crash recovery, drift, and rollback
 
 Definition of done: a two-robot test fleet can deploy a digest-pinned container,
 prove that exact digest is running and healthy, survive an agent restart, detect
 manually introduced drift, and restore the previous healthy artifact on failure.
 
-## Planned
+The v0.6 reconciliation milestone is complete. The two-agent integration suite
+now exercises those boundaries through the fleet and agent gRPC APIs, including
+bounded runtime failure and reverse-order recovery.
+
+## Current focus
 
 ### v0.7 — Trust
 
@@ -82,6 +86,8 @@ Verify artifact identity and make every deployment decision attributable.
 - Append-only structured audit events for operator and agent actions
 - Artifact provenance surfaced in deployment status
 - Negative tests for unsigned, untrusted, and tampered artifacts
+
+## Planned
 
 ### v0.8 — Control
 
@@ -108,5 +114,6 @@ Prove reliability under realistic fleet and failure conditions.
 Stable compatibility guarantees for the agent API, configuration schemas, CLI
 automation output, deployment state, and supported runtime-driver interface.
 
-The ordering may change when field testing reveals a higher-risk gap, but v0.6
-remains the next milestone until end-to-end runtime reconciliation is complete.
+The ordering may change when field testing reveals a higher-risk gap. With
+end-to-end runtime reconciliation complete, v0.7 artifact trust and auditability
+are the next milestone.
