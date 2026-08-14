@@ -52,19 +52,19 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.0
-        with:
-          cosign-release: v3.0.6
-
       - name: Install dependencies
         shell: bash
         run: |
           apt-get update
-          apt-get install -y curl ros-dev-tools libyaml-cpp-dev \
+          apt-get install -y curl gettext-base ros-dev-tools libyaml-cpp-dev \
             libprotobuf-dev protobuf-compiler libgrpc++-dev protobuf-compiler-grpc
           rosdep update
           rosdep install --from-paths . --ignore-src -r -y --skip-keys grpc
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: v3.0.6
 
       - name: Prepare signed and negative fixtures
         shell: bash
