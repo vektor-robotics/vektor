@@ -18,9 +18,10 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y ros-dev-tools libyaml-cpp-dev
+          apt-get install -y ros-dev-tools libyaml-cpp-dev libprotobuf-dev \
+            protobuf-compiler libgrpc++-dev protobuf-compiler-grpc
           rosdep update
-          rosdep install --from-paths . --ignore-src -r -y
+          rosdep install --from-paths . --ignore-src -r -y --skip-keys grpc
 
       - name: Build
         shell: bash

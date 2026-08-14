@@ -2,6 +2,16 @@
 
 All notable changes to VEKTOR are documented here.
 
+## [0.3.0] - 2026-08-14
+
+### Added
+
+- Long-running `vektor agent` command with periodic health inspection.
+- Versioned gRPC `GetStatus` and server-streaming `WatchStatus` methods.
+- Mutual TLS with mandatory client-certificate verification for network use.
+- Explicit insecure development mode restricted to loopback and Unix sockets.
+- Sequence-numbered protobuf snapshots backed by offline-safe local history.
+
 ## [0.2.0] - 2026-08-14
 
 ### Added

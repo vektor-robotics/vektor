@@ -14,6 +14,12 @@ bounded local history.
 A lightweight machine agent exposing versioned status snapshots over gRPC with
 mutual authentication and offline-safe local operation.
 
+- Periodic policy evaluation
+- Versioned `GetStatus` and `WatchStatus` RPCs
+- Mutual TLS for network listeners
+- Explicit loopback-only insecure development mode
+- Sequence-numbered snapshots and bounded local history
+
 ## v0.4 — Fleet
 
 Fleet inventory, labels, health aggregation, and staged target selection.
