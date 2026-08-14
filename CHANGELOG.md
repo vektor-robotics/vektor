@@ -2,6 +2,18 @@
 
 All notable changes to VEKTOR are documented here.
 
+## [0.5.0] - 2026-08-14
+
+### Added
+
+- Digest-pinned OCI artifact preparation through Docker or Podman.
+- Versioned agent RPCs for prepare, activate, inspect, and rollback operations.
+- Atomic, restart-safe desired-deployment state on every agent.
+- Strict rollout YAML with deterministic, non-overlapping waves.
+- `vektor deploy`, `vektor promote`, and `vektor rollback` commands.
+- Preflight and post-activation health gates with automatic wave rollback.
+- Persistent operator rollout state for deliberate, resumable promotion.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added

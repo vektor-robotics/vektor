@@ -3,6 +3,7 @@
 #include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
 #include "vektor/reporter.hpp"
+#include "vektor/rollout.hpp"
 #include "vektor/status.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -33,6 +34,8 @@ struct CliOptions {
   std::optional<std::filesystem::path> tls_client_ca;
   std::vector<std::string> selectors;
   std::optional<std::size_t> limit;
+  std::filesystem::path deployment_state{".vektor/deployment.yaml"};
+  std::string oci_runtime{"docker"};
 };
 
 [[noreturn]] void usage_error(const std::string &message = {}) {
@@ -50,10 +53,14 @@ struct CliOptions {
                "[--history <path>|--no-history]\n"
             << "                (--tls-cert <path> --tls-key <path> "
                "--tls-ca <path>|--insecure)\n"
+            << "                [--oci-runtime docker|podman] "
+               "[--deployment-state <path>]\n"
             << "  vektor fleet  --config <path> [--format text|json] "
                "[--selector key=value]...\n"
             << "                [--limit <count>] [--watch] "
-               "[--interval-ms <ms>]\n";
+               "[--interval-ms <ms>]\n"
+            << "  vektor deploy|promote|rollback --config <rollout.yaml> "
+               "[--format text|json]\n";
   throw std::invalid_argument("invalid command line");
 }
 
@@ -70,7 +77,9 @@ CliOptions parse_cli(int argc, char **argv) {
   CliOptions options;
   options.command = argv[1];
   if (options.command != "check" && options.command != "status" &&
-      options.command != "agent" && options.command != "fleet")
+      options.command != "agent" && options.command != "fleet" &&
+      options.command != "deploy" && options.command != "promote" &&
+      options.command != "rollback")
     usage_error("unknown command '" + options.command + "'");
 
   for (int index = 2; index < argc; ++index) {
@@ -110,6 +119,10 @@ CliOptions parse_cli(int argc, char **argv) {
       options.tls_private_key = next_value(index, argc, argv, argument);
     else if (argument == "--tls-ca")
       options.tls_client_ca = next_value(index, argc, argv, argument);
+    else if (argument == "--deployment-state")
+      options.deployment_state = next_value(index, argc, argv, argument);
+    else if (argument == "--oci-runtime")
+      options.oci_runtime = next_value(index, argc, argv, argument);
     else if (argument == "--selector")
       options.selectors.push_back(next_value(index, argc, argv, argument));
     else if (argument == "--limit") {
@@ -139,13 +152,17 @@ CliOptions parse_cli(int argc, char **argv) {
       (options.watch || !options.robot_id.empty() || options.history_path ||
        !options.history || options.insecure || options.tls_certificate ||
        options.tls_private_key || options.tls_client_ca ||
+       options.deployment_state != ".vektor/deployment.yaml" ||
+       options.oci_runtime != "docker" ||
        options.listen_address != "127.0.0.1:50051" ||
        !options.selectors.empty() || options.limit))
     usage_error("status-only option used with check");
   if (options.command == "status" &&
       (options.insecure || options.tls_certificate || options.tls_private_key ||
        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
-       !options.selectors.empty() || options.limit))
+       options.deployment_state != ".vektor/deployment.yaml" ||
+       options.oci_runtime != "docker" || !options.selectors.empty() ||
+       options.limit))
     usage_error("agent-only option used with status");
   if (options.command == "agent" &&
       (options.watch || options.format != "text" ||
@@ -154,8 +171,23 @@ CliOptions parse_cli(int argc, char **argv) {
   if (options.command == "fleet" &&
       (!options.robot_id.empty() || options.history_path || !options.history ||
        options.insecure || options.tls_certificate || options.tls_private_key ||
-       options.tls_client_ca || options.listen_address != "127.0.0.1:50051"))
+       options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
+       options.deployment_state != ".vektor/deployment.yaml" ||
+       options.oci_runtime != "docker"))
     usage_error("option is not supported by fleet");
+  const bool rollout_command = options.command == "deploy" ||
+                               options.command == "promote" ||
+                               options.command == "rollback";
+  if (rollout_command &&
+      (options.watch || !options.robot_id.empty() || options.history_path ||
+       !options.history || options.insecure || options.tls_certificate ||
+       options.tls_private_key || options.tls_client_ca ||
+       options.listen_address != "127.0.0.1:50051" ||
+       !options.selectors.empty() || options.limit ||
+       options.deployment_state != ".vektor/deployment.yaml" ||
+       options.oci_runtime != "docker" ||
+       options.interval != std::chrono::milliseconds(5000)))
+    usage_error("option is not supported by rollout commands");
   return options;
 }
 
@@ -221,6 +253,8 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   agent_options.tls_certificate = options.tls_certificate;
   agent_options.tls_private_key = options.tls_private_key;
   agent_options.tls_client_ca = options.tls_client_ca;
+  agent_options.deployment_state_path = options.deployment_state;
+  agent_options.oci_runtime = options.oci_runtime;
   const auto robot_id =
       options.robot_id.empty() ? config.robot_id : options.robot_id;
   return vektor::AgentRunner(node, config, robot_id, std::move(agent_options))
@@ -254,6 +288,19 @@ int run_fleet(const CliOptions &options, const vektor::FleetConfig &config) {
   } while (options.watch && rclcpp::ok());
   return exit_code;
 }
+
+int run_rollout(const CliOptions &options,
+                const vektor::RolloutConfig &config) {
+  const auto report =
+      options.command == "deploy"    ? vektor::deploy_release(config)
+      : options.command == "promote" ? vektor::promote_release(config)
+                                     : vektor::rollback_release(config);
+  if (options.format == "json")
+    std::cout << vektor::rollout_report_to_json(report) << '\n';
+  else
+    vektor::print_rollout_report(report, std::cout);
+  return report.success ? 0 : 1;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -261,7 +308,11 @@ int main(int argc, char **argv) {
   try {
     const auto options = parse_cli(argc, argv);
     int exit_code = 0;
-    if (options.command == "fleet") {
+    if (options.command == "deploy" || options.command == "promote" ||
+        options.command == "rollback") {
+      exit_code = run_rollout(options,
+                              vektor::load_rollout_config(options.config_path));
+    } else if (options.command == "fleet") {
       exit_code =
           run_fleet(options, vektor::load_fleet_config(options.config_path));
     } else {

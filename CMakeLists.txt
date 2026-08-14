@@ -75,6 +75,13 @@ ament_target_dependencies(vektor_core
   lifecycle_msgs
 )
 
+add_library(vektor_deployment src/deployment.cpp)
+target_include_directories(vektor_deployment PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(vektor_deployment vektor_proto yaml-cpp Threads::Threads)
+
 add_library(vektor_agent src/agent.cpp)
 target_include_directories(vektor_agent PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -82,6 +89,7 @@ target_include_directories(vektor_agent PUBLIC
 )
 target_link_libraries(vektor_agent
   vektor_core
+  vektor_deployment
   vektor_proto
   gRPC::grpc++
   Threads::Threads
@@ -100,11 +108,27 @@ target_link_libraries(vektor_fleet
   Threads::Threads
 )
 
+add_library(vektor_rollout src/rollout.cpp)
+target_include_directories(vektor_rollout PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(vektor_rollout
+  vektor_deployment
+  vektor_fleet
+  vektor_proto
+  yaml-cpp
+  gRPC::grpc++
+  Threads::Threads
+)
+
 add_executable(vektor src/main.cpp)
-target_link_libraries(vektor vektor_core vektor_agent vektor_fleet)
+target_link_libraries(vektor
+  vektor_core vektor_agent vektor_fleet vektor_rollout)
 ament_target_dependencies(vektor rclcpp)
 
-install(TARGETS vektor vektor_core vektor_agent vektor_fleet vektor_proto
+install(TARGETS vektor vektor_core vektor_agent vektor_deployment vektor_fleet
+  vektor_rollout vektor_proto
   EXPORT vektor_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -148,6 +172,13 @@ if(BUILD_TESTING)
   ament_add_gtest(test_fleet test/test_fleet.cpp)
   target_link_libraries(test_fleet vektor_fleet vektor_agent vektor_proto
     gRPC::grpc++)
+
+  ament_add_gtest(test_deployment test/test_deployment.cpp)
+  target_link_libraries(test_deployment vektor_deployment vektor_proto)
+
+  ament_add_gtest(test_rollout test/test_rollout.cpp)
+  target_link_libraries(test_rollout vektor_rollout vektor_agent
+    vektor_deployment vektor_proto gRPC::grpc++)
 endif()
 
 ament_export_include_directories(include)
