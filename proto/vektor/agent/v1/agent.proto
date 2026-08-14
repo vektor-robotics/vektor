@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package vektor.agent.v1;
+
+enum HealthState {
+  HEALTH_STATE_UNSPECIFIED = 0;
+  HEALTH_STATE_HEALTHY = 1;
+  HEALTH_STATE_DEGRADED = 2;
+  HEALTH_STATE_UNHEALTHY = 3;
+  HEALTH_STATE_UNREACHABLE = 4;
+}
+
+enum CheckStatus {
+  CHECK_STATUS_UNSPECIFIED = 0;
+  CHECK_STATUS_PASS = 1;
+  CHECK_STATUS_WARN = 2;
+  CHECK_STATUS_FAIL = 3;
+}
+
+message CheckResult {
+  CheckStatus status = 1;
+  string category = 2;
+  string target = 3;
+  string message = 4;
+  int64 duration_ms = 5;
+}
+
+message StatusSnapshot {
+  uint32 schema_version = 1;
+  string timestamp = 2;
+  string robot_id = 3;
+  string hostname = 4;
+  int32 ros_domain_id = 5;
+  HealthState state = 6;
+  int64 duration_ms = 7;
+  repeated CheckResult checks = 8;
+  uint64 sequence = 9;
+}
+
+message GetStatusRequest {}
+
+message WatchStatusRequest {}
+
+service Agent {
+  rpc GetStatus(GetStatusRequest) returns (StatusSnapshot);
+  rpc WatchStatus(WatchStatusRequest) returns (stream StatusSnapshot);
+}

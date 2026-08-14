@@ -16,6 +16,45 @@ find_package(lifecycle_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Protobuf REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+
+set(VEKTOR_PROTO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/proto)
+set(VEKTOR_PROTO_FILE ${VEKTOR_PROTO_ROOT}/vektor/agent/v1/agent.proto)
+set(VEKTOR_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(VEKTOR_PROTO_SOURCE ${VEKTOR_GENERATED_DIR}/vektor/agent/v1/agent.pb.cc)
+set(VEKTOR_PROTO_HEADER ${VEKTOR_GENERATED_DIR}/vektor/agent/v1/agent.pb.h)
+set(VEKTOR_GRPC_SOURCE ${VEKTOR_GENERATED_DIR}/vektor/agent/v1/agent.grpc.pb.cc)
+set(VEKTOR_GRPC_HEADER ${VEKTOR_GENERATED_DIR}/vektor/agent/v1/agent.grpc.pb.h)
+
+add_custom_command(
+  OUTPUT
+    ${VEKTOR_PROTO_SOURCE}
+    ${VEKTOR_PROTO_HEADER}
+    ${VEKTOR_GRPC_SOURCE}
+    ${VEKTOR_GRPC_HEADER}
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+    ${VEKTOR_GENERATED_DIR}/vektor/agent/v1
+  COMMAND protobuf::protoc
+    --proto_path=${VEKTOR_PROTO_ROOT}
+    --cpp_out=${VEKTOR_GENERATED_DIR}
+    --grpc_out=${VEKTOR_GENERATED_DIR}
+    --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+    ${VEKTOR_PROTO_FILE}
+  DEPENDS ${VEKTOR_PROTO_FILE}
+  VERBATIM
+)
+
+add_library(vektor_proto
+  ${VEKTOR_PROTO_SOURCE}
+  ${VEKTOR_GRPC_SOURCE}
+)
+target_include_directories(vektor_proto PUBLIC
+  $<BUILD_INTERFACE:${VEKTOR_GENERATED_DIR}>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(vektor_proto PUBLIC protobuf::libprotobuf gRPC::grpc++)
 
 add_library(vektor_core
   src/config.cpp
@@ -23,7 +62,10 @@ add_library(vektor_core
   src/reporter.cpp
   src/status.cpp
 )
-target_include_directories(vektor_core PUBLIC include)
+target_include_directories(vektor_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 target_link_libraries(vektor_core yaml-cpp)
 ament_target_dependencies(vektor_core
   rclcpp
@@ -33,17 +75,37 @@ ament_target_dependencies(vektor_core
   lifecycle_msgs
 )
 
+add_library(vektor_agent src/agent.cpp)
+target_include_directories(vektor_agent PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(vektor_agent
+  vektor_core
+  vektor_proto
+  gRPC::grpc++
+  Threads::Threads
+)
+ament_target_dependencies(vektor_agent rclcpp)
+
 add_executable(vektor src/main.cpp)
-target_link_libraries(vektor vektor_core)
+target_link_libraries(vektor vektor_core vektor_agent)
 ament_target_dependencies(vektor rclcpp)
 
-install(TARGETS vektor vektor_core
+install(TARGETS vektor vektor_core vektor_agent vektor_proto
+  EXPORT vektor_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/vektor
 )
 install(DIRECTORY include/ DESTINATION include)
+install(FILES
+  ${VEKTOR_PROTO_HEADER}
+  ${VEKTOR_GRPC_HEADER}
+  DESTINATION include/vektor/agent/v1
+)
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config)
+install(DIRECTORY proto/ DESTINATION share/${PROJECT_NAME}/proto)
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
@@ -67,8 +129,21 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_status test/test_status.cpp)
   target_link_libraries(test_status vektor_core)
+
+  ament_add_gtest(test_agent test/test_agent.cpp)
+  target_link_libraries(test_agent vektor_agent vektor_proto gRPC::grpc++)
 endif()
 
 ament_export_include_directories(include)
-ament_export_dependencies(rclcpp rclcpp_action tf2 tf2_ros lifecycle_msgs yaml-cpp)
+ament_export_targets(vektor_targets HAS_LIBRARY_TARGET)
+ament_export_dependencies(
+  rclcpp
+  rclcpp_action
+  tf2
+  tf2_ros
+  lifecycle_msgs
+  yaml-cpp
+  Protobuf
+  gRPC
+)
 ament_package()

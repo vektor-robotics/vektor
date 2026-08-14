@@ -1,3 +1,4 @@
+#include "vektor/agent.hpp"
 #include "vektor/config.hpp"
 #include "vektor/health_inspector.hpp"
 #include "vektor/reporter.hpp"
@@ -23,6 +24,11 @@ struct CliOptions {
   bool history{true};
   std::chrono::milliseconds interval{5000};
   std::optional<std::filesystem::path> history_path;
+  std::string listen_address{"127.0.0.1:50051"};
+  bool insecure{false};
+  std::optional<std::filesystem::path> tls_certificate;
+  std::optional<std::filesystem::path> tls_private_key;
+  std::optional<std::filesystem::path> tls_client_ca;
 };
 
 [[noreturn]] void usage_error(const std::string &message = {}) {
@@ -33,7 +39,13 @@ struct CliOptions {
             << "  vektor status --config <path> [--format text|json] "
                "[--robot-id <id>]\n"
             << "                [--watch] [--interval-ms <ms>] "
-               "[--history <path>|--no-history]\n";
+               "[--history <path>|--no-history]\n"
+            << "  vektor agent  --config <path> [--robot-id <id>] "
+               "[--interval-ms <ms>]\n"
+            << "                [--listen <host:port>] "
+               "[--history <path>|--no-history]\n"
+            << "                (--tls-cert <path> --tls-key <path> "
+               "--tls-ca <path>|--insecure)\n";
   throw std::invalid_argument("invalid command line");
 }
 
@@ -49,7 +61,8 @@ CliOptions parse_cli(int argc, char **argv) {
     usage_error();
   CliOptions options;
   options.command = argv[1];
-  if (options.command != "check" && options.command != "status")
+  if (options.command != "check" && options.command != "status" &&
+      options.command != "agent")
     usage_error("unknown command '" + options.command + "'");
 
   for (int index = 2; index < argc; ++index) {
@@ -75,6 +88,16 @@ CliOptions parse_cli(int argc, char **argv) {
       options.history_path = next_value(index, argc, argv, argument);
     else if (argument == "--no-history")
       options.history = false;
+    else if (argument == "--listen")
+      options.listen_address = next_value(index, argc, argv, argument);
+    else if (argument == "--insecure")
+      options.insecure = true;
+    else if (argument == "--tls-cert")
+      options.tls_certificate = next_value(index, argc, argv, argument);
+    else if (argument == "--tls-key")
+      options.tls_private_key = next_value(index, argc, argv, argument);
+    else if (argument == "--tls-ca")
+      options.tls_client_ca = next_value(index, argc, argv, argument);
     else
       usage_error("unknown option '" + argument + "'");
   }
@@ -85,8 +108,16 @@ CliOptions parse_cli(int argc, char **argv) {
     usage_error("--format must be text or json");
   if (options.command == "check" &&
       (options.watch || !options.robot_id.empty() || options.history_path ||
-       !options.history))
+       !options.history || options.insecure || options.tls_certificate ||
+       options.tls_private_key || options.tls_client_ca ||
+       options.listen_address != "127.0.0.1:50051"))
     usage_error("status-only option used with check");
+  if (options.command == "status" &&
+      (options.insecure || options.tls_certificate || options.tls_private_key ||
+       options.tls_client_ca || options.listen_address != "127.0.0.1:50051"))
+    usage_error("agent-only option used with status");
+  if (options.command == "agent" && (options.watch || options.format != "text"))
+    usage_error("status-only option used with agent");
   return options;
 }
 
@@ -140,6 +171,23 @@ int run_status(const CliOptions &options, const vektor::CheckConfig &config,
   } while (options.watch && rclcpp::ok());
   return exit_code;
 }
+
+int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
+              const rclcpp::Node::SharedPtr &node) {
+  vektor::AgentOptions agent_options;
+  agent_options.listen_address = options.listen_address;
+  agent_options.interval = options.interval;
+  agent_options.history_path = options.history_path;
+  agent_options.history = options.history;
+  agent_options.insecure = options.insecure;
+  agent_options.tls_certificate = options.tls_certificate;
+  agent_options.tls_private_key = options.tls_private_key;
+  agent_options.tls_client_ca = options.tls_client_ca;
+  const auto robot_id =
+      options.robot_id.empty() ? config.robot_id : options.robot_id;
+  return vektor::AgentRunner(node, config, robot_id, std::move(agent_options))
+      .run();
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -148,9 +196,10 @@ int main(int argc, char **argv) {
     const auto options = parse_cli(argc, argv);
     const auto config = vektor::load_config(options.config_path);
     auto node = std::make_shared<rclcpp::Node>("vektor_" + options.command);
-    const int exit_code = options.command == "check"
-                              ? run_check(options, config, node)
-                              : run_status(options, config, node);
+    const int exit_code =
+        options.command == "check"    ? run_check(options, config, node)
+        : options.command == "status" ? run_status(options, config, node)
+                                      : run_agent(options, config, node);
     rclcpp::shutdown();
     return exit_code;
   } catch (const std::invalid_argument &error) {

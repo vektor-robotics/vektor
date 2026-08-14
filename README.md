@@ -3,9 +3,9 @@
 Safe software delivery for autonomous machines.
 
 VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets.
-`vektor check` validates a live ROS graph, while `vektor status` produces a
-timestamped machine-health snapshot for operators, scripts, and future fleet
-agents.
+`vektor check` validates a live ROS graph, `vektor status` produces a
+timestamped machine-health snapshot, and `vektor agent` serves continuously
+updated snapshots to fleet clients over a versioned gRPC API.
 
 ## Milestone 1 checks
 
@@ -37,6 +37,37 @@ By default, `status` keeps the latest 100 JSON snapshots at
 disable persistence with `--no-history`. `--robot-id` overrides `robot_id` from
 the policy.
 
+## Agent
+
+The agent runs the same health policy continuously and exposes two versioned
+gRPC methods:
+
+- `GetStatus` returns the latest snapshot.
+- `WatchStatus` streams each new snapshot as it is published.
+
+For local development, insecure transport must be requested explicitly and is
+restricted to loopback or Unix sockets:
+
+```bash
+ros2 run vektor vektor agent --config config/talker.yaml \
+  --listen 127.0.0.1:50051 --interval-ms 5000 --insecure
+```
+
+Any non-loopback deployment requires mutual TLS. The server certificate and key
+identify the agent; `--tls-ca` is the CA used to authenticate fleet clients:
+
+```bash
+ros2 run vektor vektor agent --config /etc/vektor/policy.yaml \
+  --listen 0.0.0.0:50051 \
+  --tls-cert /etc/vektor/tls/agent.crt \
+  --tls-key /etc/vektor/tls/agent.key \
+  --tls-ca /etc/vektor/tls/client-ca.crt
+```
+
+The first request may return gRPC `UNAVAILABLE` until initial ROS discovery and
+inspection finish. The agent continues writing the bounded local status history
+while fleet connectivity is unavailable.
+
 ## Repository layout
 
 ```text
@@ -45,6 +76,8 @@ src/config.cpp        YAML policy loading
 src/health_inspector  ROS 2 graph, frequency, TF, lifecycle checks
 src/reporter.cpp      Check output and exit semantics
 src/status.cpp        Fleet-ready snapshots and bounded local history
+src/agent.cpp         Periodic inspection, mTLS, and gRPC service
+proto/                Versioned fleet API contract
 src/main.cpp          CLI entry point
 config/example.yaml   Example health policy
 test/                 GoogleTest coverage
@@ -60,7 +93,8 @@ Install the ROS dependencies in a sourced Jazzy shell:
 sudo apt update
 sudo apt install -y ros-jazzy-rclcpp ros-jazzy-rclcpp-action \
   ros-jazzy-tf2-ros ros-jazzy-lifecycle-msgs libyaml-cpp-dev \
-  ros-jazzy-ament-cmake-gtest
+  ros-jazzy-ament-cmake-gtest libprotobuf-dev protobuf-compiler \
+  libgrpc++-dev protobuf-compiler-grpc
 source /opt/ros/jazzy/setup.bash
 ```
 
@@ -71,7 +105,7 @@ mkdir -p ~/vektor_ws/src
 cp -r . ~/vektor_ws/src/vektor
 cd ~/vektor_ws
 source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths src --ignore-src -r -y
+rosdep install --from-paths src --ignore-src -r -y --skip-keys grpc
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 source install/setup.bash
 ```
@@ -129,9 +163,9 @@ colcon test-result --verbose
 
 ## Roadmap
 
-Milestone 2 adds status snapshots and watch mode. The next milestone introduces a
-lightweight `vektor-agent` and gRPC API, followed by fleet inventory, progressive
-deployment, promotion, and rollback. See `ROADMAP.md`.
+Milestones 1–3 provide checks, status snapshots, and the mutually authenticated
+machine agent. The next milestone introduces fleet inventory and aggregation,
+followed by progressive deployment, promotion, and rollback. See `ROADMAP.md`.
 
 ## Contributing and security
 
