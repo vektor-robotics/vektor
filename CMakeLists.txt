@@ -88,11 +88,23 @@ target_link_libraries(vektor_agent
 )
 ament_target_dependencies(vektor_agent rclcpp)
 
+add_library(vektor_fleet src/fleet.cpp)
+target_include_directories(vektor_fleet PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(vektor_fleet
+  vektor_core
+  vektor_proto
+  gRPC::grpc++
+  Threads::Threads
+)
+
 add_executable(vektor src/main.cpp)
-target_link_libraries(vektor vektor_core vektor_agent)
+target_link_libraries(vektor vektor_core vektor_agent vektor_fleet)
 ament_target_dependencies(vektor rclcpp)
 
-install(TARGETS vektor vektor_core vektor_agent vektor_proto
+install(TARGETS vektor vektor_core vektor_agent vektor_fleet vektor_proto
   EXPORT vektor_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -132,6 +144,10 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_agent test/test_agent.cpp)
   target_link_libraries(test_agent vektor_agent vektor_proto gRPC::grpc++)
+
+  ament_add_gtest(test_fleet test/test_fleet.cpp)
+  target_link_libraries(test_fleet vektor_fleet vektor_agent vektor_proto
+    gRPC::grpc++)
 endif()
 
 ament_export_include_directories(include)
@@ -145,5 +161,6 @@ ament_export_dependencies(
   yaml-cpp
   Protobuf
   gRPC
+  Threads
 )
 ament_package()

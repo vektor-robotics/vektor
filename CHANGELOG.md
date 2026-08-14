@@ -2,6 +2,17 @@
 
 All notable changes to VEKTOR are documented here.
 
+## [0.4.0] - 2026-08-14
+
+### Added
+
+- `vektor fleet` command for concurrent multi-agent health collection.
+- Strict YAML fleet inventory with robot endpoints and labels.
+- Deterministic label selectors and bounded staged target selection.
+- Mutual-TLS fleet client credentials and loopback-only insecure mode.
+- Aggregate fleet health with explicit unhealthy and unreachable robots.
+- Text, JSON, and continuous watch output for fleet operators.
+
 ## [0.3.0] - 2026-08-14
 
 ### Added

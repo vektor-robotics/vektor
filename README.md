@@ -4,8 +4,9 @@ Safe software delivery for autonomous machines.
 
 VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets.
 `vektor check` validates a live ROS graph, `vektor status` produces a
-timestamped machine-health snapshot, and `vektor agent` serves continuously
-updated snapshots to fleet clients over a versioned gRPC API.
+timestamped machine-health snapshot, `vektor agent` serves continuously updated
+snapshots over gRPC, and `vektor fleet` aggregates health across selected
+machines.
 
 ## Milestone 1 checks
 
@@ -68,6 +69,53 @@ The first request may return gRPC `UNAVAILABLE` until initial ROS discovery and
 inspection finish. The agent continues writing the bounded local status history
 while fleet connectivity is unavailable.
 
+## Fleet inventory and targeting
+
+Fleet inventory is a strict YAML document containing robot identities,
+endpoints, labels, request deadlines, and shared client transport credentials.
+See `config/fleet.example.yaml` for a loopback development inventory.
+
+Query every robot:
+
+```bash
+ros2 run vektor vektor fleet --config config/fleet.example.yaml
+```
+
+Select a deterministic canary stage using one or more label predicates and an
+inventory-order limit:
+
+```bash
+ros2 run vektor vektor fleet --config config/fleet.example.yaml \
+  --selector site=berlin --selector role=picker --limit 1
+```
+
+Use JSON for automation or watch the fleet continuously:
+
+```bash
+ros2 run vektor vektor fleet --config config/fleet.example.yaml --format json
+ros2 run vektor vektor fleet --config config/fleet.example.yaml \
+  --watch --interval-ms 5000
+```
+
+Fleet requests run concurrently with the configured per-agent deadline. A robot
+is reported as `unreachable` when its RPC fails, times out, or returns a snapshot
+older than `max_snapshot_age_ms`. Unsupported schemas and identity mismatches are
+`unhealthy`, preventing accidental targeting of incompatible or wrong machines.
+The command exits `1` when any selected robot is unhealthy or unreachable.
+
+For production, replace `insecure: true` with shared mutual-TLS client settings:
+
+```yaml
+transport:
+  ca_certificate: tls/agent-ca.crt
+  client_certificate: tls/fleet-client.crt
+  client_key: tls/fleet-client.key
+```
+
+Relative certificate paths resolve from the inventory file. Optional
+`tls_server_name` on a robot supports certificate identities that differ from
+the endpoint hostname.
+
 ## Repository layout
 
 ```text
@@ -77,9 +125,11 @@ src/health_inspector  ROS 2 graph, frequency, TF, lifecycle checks
 src/reporter.cpp      Check output and exit semantics
 src/status.cpp        Fleet-ready snapshots and bounded local history
 src/agent.cpp         Periodic inspection, mTLS, and gRPC service
+src/fleet.cpp         Inventory, targeting, concurrent polling, aggregation
 proto/                Versioned fleet API contract
 src/main.cpp          CLI entry point
 config/example.yaml   Example health policy
+config/fleet.example.yaml  Example fleet inventory
 test/                 GoogleTest coverage
 ```
 
@@ -163,9 +213,9 @@ colcon test-result --verbose
 
 ## Roadmap
 
-Milestones 1–3 provide checks, status snapshots, and the mutually authenticated
-machine agent. The next milestone introduces fleet inventory and aggregation,
-followed by progressive deployment, promotion, and rollback. See `ROADMAP.md`.
+Milestones 1–4 provide checks, status snapshots, the mutually authenticated
+machine agent, and fleet aggregation. The next milestone adds progressive OCI
+deployment, promotion, pause, and rollback. See `ROADMAP.md`.
 
 ## Contributing and security
 

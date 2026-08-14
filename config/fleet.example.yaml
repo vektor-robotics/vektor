@@ -1,0 +1,22 @@
+# VEKTOR fleet inventory for local development.
+fleet_id: warehouse-dev
+request_timeout_ms: 2000
+max_snapshot_age_ms: 15000
+
+transport:
+  insecure: true
+
+robots:
+  - id: robot-001
+    endpoint: 127.0.0.1:50051
+    labels:
+      site: berlin
+      role: picker
+      ring: canary
+
+  - id: robot-002
+    endpoint: 127.0.0.1:50052
+    labels:
+      site: berlin
+      role: picker
+      ring: stable
