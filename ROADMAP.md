@@ -61,10 +61,10 @@ gap in the current deployment path.
 - [x] Persist desired, observed, and previously active artifact state separately
 - [x] Add idempotent start, stop, inspect, and rollback reconciliation operations
 - [x] Add a strict workload spec for arguments, environment, mounts, and devices
-- [ ] Require runtime readiness and ROS health before rollout activation completes
+- [x] Require runtime readiness and ROS health before rollout activation completes
 - [x] Detect drift between desired and observed runtime state
 - [x] Recheck observed state after agent restart without unintended promotion
-- [ ] Add explicit reconciliation progress and failures to operator CLI output
+- [x] Add explicit reconciliation progress and failures to operator CLI output
 - [ ] Complete integration coverage for timeout, crash recovery, drift, and rollback
 
 Definition of done: a two-robot test fleet can deploy a digest-pinned container,

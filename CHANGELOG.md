@@ -14,7 +14,13 @@ All notable changes to VEKTOR are documented here.
 - Strict workload configuration for network mode, restart policy, environment,
   bind mounts, devices, and command arguments.
 - Restart-safe restoration of the previous artifact and workload configuration.
-- Deployment API schema v3 fields for observed runtime and workload state.
+- Deployment API schema v4 fields for runtime readiness and persisted
+  reconciliation operation progress.
+- Bounded OCI runtime commands with process-tree termination on timeout.
+- OCI health-check readiness polling and fresh post-activation ROS health gates.
+- Restart recovery for interrupted prepare, activation, and rollback operations
+  without silently promoting an interrupted activation.
+- Rollout JSON schema v2 with per-robot phase and operation fields.
 
 ## [0.5.0] - 2026-08-14
 

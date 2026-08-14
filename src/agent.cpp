@@ -66,6 +66,23 @@ vektor::agent::v1::CheckStatus proto_check_status(CheckStatus status) {
   }
   return vektor::agent::v1::CHECK_STATUS_UNSPECIFIED;
 }
+
+std::chrono::milliseconds request_timeout(std::int64_t value,
+                                          std::chrono::milliseconds fallback,
+                                          const char *field) {
+  constexpr std::int64_t maximum = 24LL * 60 * 60 * 1000;
+  if (value == 0)
+    return fallback;
+  if (value < 0 || value > maximum)
+    throw std::invalid_argument(std::string(field) +
+                                " must be between 1 ms and 24 hours");
+  return std::chrono::milliseconds(value);
+}
+
+bool health_ready(HealthState state, bool allow_degraded) {
+  return state == HealthState::Healthy ||
+         (allow_degraded && state == HealthState::Degraded);
+}
 } // namespace
 
 void validate_agent_options(const AgentOptions &options) {
@@ -183,8 +200,11 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     const auto workload = request->has_workload()
                               ? from_proto(request->workload())
                               : WorkloadSpec{};
+    const auto timeout =
+        request_timeout(request->operation_timeout_ms(),
+                        std::chrono::minutes(5), "operation_timeout_ms");
     *response = to_proto(deployment_state_->prepare(
-        request->deployment_id(), request->artifact(), workload));
+        request->deployment_id(), request->artifact(), workload, timeout));
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -194,16 +214,46 @@ grpc::Status GrpcAgentService::PrepareDeployment(
 }
 
 grpc::Status GrpcAgentService::ActivateDeployment(
-    grpc::ServerContext *,
+    grpc::ServerContext *context,
     const vektor::agent::v1::ActivateDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
   if (!deployment_state_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
   try {
-    *response = to_proto(deployment_state_->activate(request->deployment_id()));
+    const auto operation_timeout =
+        request_timeout(request->operation_timeout_ms(),
+                        std::chrono::minutes(5), "operation_timeout_ms");
+    const auto readiness_timeout =
+        request_timeout(request->readiness_timeout_ms(),
+                        std::chrono::seconds(30), "readiness_timeout_ms");
+    const auto before = state_.latest();
+    const auto after_sequence = before ? before->sequence : 0;
+    const auto record = deployment_state_->activate(
+        request->deployment_id(), operation_timeout, readiness_timeout);
+    const auto fresh =
+        state_.wait_for_change(after_sequence, readiness_timeout);
+    if (context->IsCancelled())
+      throw std::runtime_error(
+          "activation cancelled while awaiting ROS health");
+    if (!fresh)
+      throw std::runtime_error(
+          "fresh ROS health snapshot was not published before timeout");
+    if (!health_ready(fresh->snapshot.state, request->allow_degraded()))
+      throw std::runtime_error(
+          "fresh ROS health snapshot did not satisfy rollout policy");
+    *response = to_proto(record);
+    response->set_message(record.message + "; fresh ROS health is " +
+                          health_state_name(fresh->snapshot.state));
     return grpc::Status::OK;
+  } catch (const std::invalid_argument &error) {
+    return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
   } catch (const std::exception &error) {
+    try {
+      deployment_state_->fail_activation(request->deployment_id(),
+                                         error.what());
+    } catch (...) {
+    }
     return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
   }
 }
@@ -216,8 +266,14 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
   try {
-    *response = to_proto(deployment_state_->rollback(request->deployment_id()));
+    const auto timeout =
+        request_timeout(request->operation_timeout_ms(),
+                        std::chrono::minutes(5), "operation_timeout_ms");
+    *response = to_proto(
+        deployment_state_->rollback(request->deployment_id(), timeout));
     return grpc::Status::OK;
+  } catch (const std::invalid_argument &error) {
+    return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
   } catch (const std::exception &error) {
     return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
   }
@@ -261,7 +317,8 @@ int AgentRunner::run() {
                                                     options_.runtime_container);
   AgentDeploymentState deployment_state(options_.deployment_state_path,
                                         std::move(runtime));
-  if (deployment_state.current().phase != DeploymentPhase::Idle) {
+  if (deployment_state.current().phase != DeploymentPhase::Idle ||
+      deployment_state.current().operation != ReconciliationOperation::None) {
     const auto restored = deployment_state.refresh_observed();
     if (restored.drift_detected)
       RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
@@ -314,7 +371,9 @@ int AgentRunner::run() {
       }
       state_.publish(std::move(snapshot));
 
-      if (deployment_state.current().phase != DeploymentPhase::Idle) {
+      if (deployment_state.current().phase != DeploymentPhase::Idle ||
+          deployment_state.current().operation !=
+              ReconciliationOperation::None) {
         const auto deployment = deployment_state.refresh_observed();
         if (deployment.drift_detected)
           RCLCPP_ERROR(node_->get_logger(), "%s", deployment.message.c_str());

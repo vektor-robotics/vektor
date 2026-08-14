@@ -3,6 +3,8 @@
 #include "vektor/agent/v1/agent.grpc.pb.h"
 #include "vektor/runtime.hpp"
 
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -12,6 +14,7 @@
 namespace vektor {
 
 enum class DeploymentPhase { Idle, Staged, Active, RolledBack, Failed };
+enum class ReconciliationOperation { None, Preparing, Activating, RollingBack };
 
 struct DeploymentRecord {
   std::string deployment_id;
@@ -23,14 +26,20 @@ struct DeploymentRecord {
   std::string observed_workload_fingerprint;
   std::string runtime_id;
   bool runtime_running{false};
+  bool runtime_ready{false};
   bool runtime_managed{false};
+  std::string runtime_readiness_status;
   bool drift_detected{false};
   DeploymentPhase phase{DeploymentPhase::Idle};
+  ReconciliationOperation operation{ReconciliationOperation::None};
+  std::string operation_started_at;
+  std::uint64_t operation_attempt{0};
   std::string message;
   std::string updated_at;
 };
 
 const char *deployment_phase_name(DeploymentPhase phase);
+const char *reconciliation_operation_name(ReconciliationOperation operation);
 bool is_valid_deployment_id(const std::string &value);
 bool is_pinned_oci_artifact(const std::string &artifact);
 
@@ -39,12 +48,21 @@ public:
   AgentDeploymentState(std::filesystem::path state_path,
                        std::shared_ptr<RuntimeDriver> runtime);
 
-  DeploymentRecord prepare(const std::string &deployment_id,
-                           const std::string &artifact,
-                           WorkloadSpec workload = {});
-  DeploymentRecord activate(const std::string &deployment_id);
-  DeploymentRecord rollback(const std::string &deployment_id);
-  DeploymentRecord refresh_observed();
+  DeploymentRecord prepare(
+      const std::string &deployment_id, const std::string &artifact,
+      WorkloadSpec workload = {},
+      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5));
+  DeploymentRecord activate(
+      const std::string &deployment_id,
+      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
+      std::chrono::milliseconds readiness_timeout = std::chrono::seconds(30));
+  DeploymentRecord rollback(
+      const std::string &deployment_id,
+      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5));
+  DeploymentRecord refresh_observed(
+      std::chrono::milliseconds operation_timeout = std::chrono::seconds(30));
+  DeploymentRecord fail_activation(const std::string &deployment_id,
+                                   const std::string &message);
   DeploymentRecord current() const;
 
 private:
@@ -52,11 +70,15 @@ private:
   void persist_locked() const;
 
   std::filesystem::path state_path_;
-  bool observe_locked();
+  bool observe_locked(std::chrono::milliseconds operation_timeout);
+  void begin_operation_locked(ReconciliationOperation operation);
+  void complete_operation_locked();
+  void recover_interrupted_locked(std::chrono::milliseconds operation_timeout);
   void record_failure_locked(const std::string &message);
 
   std::shared_ptr<RuntimeDriver> runtime_;
   mutable std::mutex mutex_;
+  bool operation_in_progress_{false};
   DeploymentRecord record_;
 };
 

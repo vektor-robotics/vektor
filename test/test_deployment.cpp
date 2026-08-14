@@ -4,6 +4,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <memory>
 #include <stdexcept>
 
@@ -20,6 +22,8 @@ public:
   void prepare(const std::string &artifact) override {
     ++calls;
     last_artifact = artifact;
+    if (on_prepare)
+      on_prepare();
     if (fail)
       throw std::runtime_error("simulated pull failure");
   }
@@ -29,10 +33,14 @@ public:
            const vektor::WorkloadSpec &workload) override {
     ++activate_calls;
     last_workload = workload;
+    observation = {true,     true,
+                   artifact, "container-123",
+                   true,     vektor::workload_fingerprint(workload),
+                   "none"};
+    if (on_activate)
+      on_activate();
     if (fail_activate)
       throw std::runtime_error("simulated activation failure");
-    observation = {true, artifact, "container-123", true,
-                   vektor::workload_fingerprint(workload)};
     return observation;
   }
 
@@ -49,6 +57,8 @@ public:
   int stop_calls{0};
   bool fail{false};
   bool fail_activate{false};
+  std::function<void()> on_activate;
+  std::function<void()> on_prepare;
   std::string last_artifact;
   vektor::RuntimeObservation observation;
   vektor::WorkloadSpec last_workload;
@@ -172,6 +182,74 @@ TEST(Deployment, PersistsAndRestoresPreviousWorkloadSpec) {
   std::filesystem::remove(path);
 }
 
+TEST(Deployment, RecoversInterruptedActivationWithoutSilentPromotion) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_interrupted.yaml");
+  const auto crash_copy =
+      std::filesystem::path("vektor_test_deployment_interrupted_copy.yaml");
+  std::filesystem::remove(path);
+  std::filesystem::remove(crash_copy);
+  auto runtime = std::make_shared<FakeRuntime>();
+  {
+    vektor::AgentDeploymentState state(path, runtime);
+    state.prepare("release-1", kArtifact);
+    runtime->on_activate = [&] {
+      std::filesystem::copy_file(
+          path, crash_copy, std::filesystem::copy_options::overwrite_existing);
+    };
+    state.activate("release-1");
+  }
+
+  runtime->on_activate = nullptr;
+  vektor::AgentDeploymentState restored(crash_copy, runtime);
+  EXPECT_EQ(restored.current().operation,
+            vektor::ReconciliationOperation::Activating);
+  const auto recovered = restored.refresh_observed();
+  EXPECT_EQ(recovered.phase, vektor::DeploymentPhase::Staged);
+  EXPECT_EQ(recovered.operation, vektor::ReconciliationOperation::None);
+  EXPECT_TRUE(recovered.runtime_ready);
+  EXPECT_NE(recovered.message.find("retry activation"), std::string::npos);
+  const auto active = restored.activate("release-1");
+  EXPECT_EQ(active.phase, vektor::DeploymentPhase::Active);
+
+  std::filesystem::remove(path);
+  std::filesystem::remove(crash_copy);
+}
+
+TEST(Deployment, ExposesPersistedOperationProgressWhileRuntimeIsBusy) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_progress.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  vektor::AgentDeploymentState state(path, runtime);
+  std::promise<void> entered;
+  auto entered_future = entered.get_future();
+  std::promise<void> release;
+  auto release_future = release.get_future().share();
+  runtime->on_prepare = [&] {
+    entered.set_value();
+    release_future.wait();
+  };
+
+  auto pending = std::async(std::launch::async, [&] {
+    return state.prepare("release-1", kArtifact);
+  });
+  entered_future.wait();
+  const auto progress = state.refresh_observed();
+  EXPECT_EQ(progress.operation, vektor::ReconciliationOperation::Preparing);
+  EXPECT_FALSE(progress.operation_started_at.empty());
+  EXPECT_EQ(progress.operation_attempt, 1U);
+  const auto response = vektor::to_proto(progress);
+  EXPECT_EQ(response.reconciliation_operation(),
+            vektor::agent::v1::RECONCILIATION_OPERATION_PREPARING);
+
+  release.set_value();
+  const auto staged = pending.get();
+  EXPECT_EQ(staged.phase, vektor::DeploymentPhase::Staged);
+  EXPECT_EQ(staged.operation, vektor::ReconciliationOperation::None);
+  std::filesystem::remove(path);
+}
+
 TEST(Runtime, ValidatesManagedContainerName) {
   EXPECT_TRUE(vektor::is_valid_runtime_container_name("vektor-workload_1"));
   EXPECT_FALSE(vektor::is_valid_runtime_container_name("bad name"));
@@ -263,6 +341,7 @@ TEST(Runtime, OciDriverActivatesInspectsAndProtectsUnmanagedContainer) {
   workload.command = {"robot", "--safe"};
   const auto active = driver.activate(kArtifact, workload);
   EXPECT_TRUE(active.running);
+  EXPECT_TRUE(active.ready);
   EXPECT_TRUE(active.managed);
   EXPECT_EQ(active.artifact, kArtifact);
   EXPECT_EQ(driver.inspect().runtime_id, "fake-id");
@@ -292,4 +371,96 @@ TEST(Runtime, OciDriverActivatesInspectsAndProtectsUnmanagedContainer) {
   std::filesystem::remove(managed);
   std::filesystem::remove(workload_state);
   std::filesystem::remove(arguments);
+}
+
+TEST(Runtime, OciDriverBoundsCommands) {
+  using namespace std::chrono_literals;
+  const auto executable = std::filesystem::path("vektor_slow_runtime.sh");
+  const auto state = std::filesystem::path(executable.string() + ".state");
+  std::filesystem::remove(executable);
+  std::filesystem::remove(state);
+  {
+    std::ofstream script(executable);
+    script << "#!/bin/sh\n"
+              "state=\"$0.state\"\n"
+              "case \"$1\" in\n"
+              "  pull) sleep 5 ;;\n"
+              "  inspect)\n"
+              "    test -f \"$state\" || exit 1\n"
+              "    printf '%s|fake-id|true|true|%s\\n' \"$2\" "
+              "'00000000000000000000000000000000' ;;\n"
+              "  rm) rm -f \"$state\" ;;\n"
+              "  run) touch \"$state\"; printf 'fake-id\\n' ;;\n"
+              "esac\n";
+  }
+  std::filesystem::permissions(executable,
+                               std::filesystem::perms::owner_all |
+                                   std::filesystem::perms::group_read |
+                                   std::filesystem::perms::group_exec);
+
+  vektor::OciRuntimeDriver driver("./" + executable.string(), "workload");
+  const auto started = std::chrono::steady_clock::now();
+  EXPECT_THROW(driver.prepare(kArtifact, 50ms), std::runtime_error);
+  EXPECT_LT(std::chrono::steady_clock::now() - started, 1s);
+
+  std::filesystem::remove(executable);
+  std::filesystem::remove(state);
+}
+
+TEST(Runtime, OciDriverWaitsForContainerHealth) {
+  using namespace std::chrono_literals;
+  const auto executable = std::filesystem::path("vektor_ready_runtime.sh");
+  const auto state = std::filesystem::path(executable.string() + ".state");
+  const auto workload =
+      std::filesystem::path(executable.string() + ".workload");
+  const auto attempts =
+      std::filesystem::path(executable.string() + ".attempts");
+  std::filesystem::remove(executable);
+  std::filesystem::remove(state);
+  std::filesystem::remove(workload);
+  std::filesystem::remove(attempts);
+  {
+    std::ofstream script(executable);
+    script
+        << "#!/bin/sh\n"
+           "state=\"$0.state\"\n"
+           "case \"$1\" in\n"
+           "  pull) exit 0 ;;\n"
+           "  inspect)\n"
+           "    test -f \"$state\" || exit 1\n"
+           "    count=0; test ! -f \"$0.attempts\" || count=$(cat "
+           "\"$0.attempts\")\n"
+           "    health=starting; test \"$count\" -lt 2 || health=healthy\n"
+           "    case \"$3\" in\n"
+           "      *State.Health.Status*) printf '%s\\n' \"$health\" ;;\n"
+           "      *) count=$((count + 1)); printf '%s' \"$count\" > "
+           "\"$0.attempts\"; printf '%s|fake-id|true|true|%s\\n' "
+           "\"$(cat \"$state\")\" \"$(cat \"$0.workload\")\" ;;\n"
+           "    esac ;;\n"
+           "  rm) rm -f \"$state\" \"$0.workload\" \"$0.attempts\" ;;\n"
+           "  run)\n"
+           "    for value in \"$@\"; do\n"
+           "      case \"$value\" in *@sha256:*) artifact=\"$value\" ;; esac\n"
+           "      case \"$value\" in io.vektor.workload=*) "
+           "fingerprint=\"${value#*=}\" ;; esac\n"
+           "    done\n"
+           "    printf '%s' \"$artifact\" > \"$state\"\n"
+           "    printf '%s' \"$fingerprint\" > \"$0.workload\"\n"
+           "    printf 'fake-id\\n' ;;\n"
+           "esac\n";
+  }
+  std::filesystem::permissions(executable,
+                               std::filesystem::perms::owner_all |
+                                   std::filesystem::perms::group_read |
+                                   std::filesystem::perms::group_exec);
+
+  vektor::OciRuntimeDriver driver("./" + executable.string(), "workload");
+  const auto observed = driver.activate(kArtifact, {}, 2s, 1s);
+  EXPECT_TRUE(observed.ready);
+  EXPECT_EQ(observed.readiness_status, "healthy");
+
+  std::filesystem::remove(executable);
+  std::filesystem::remove(state);
+  std::filesystem::remove(workload);
+  std::filesystem::remove(attempts);
 }

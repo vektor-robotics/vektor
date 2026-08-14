@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <map>
 #include <string>
 #include <vector>
@@ -42,14 +43,18 @@ std::string workload_fingerprint(const WorkloadSpec &spec);
 
 struct RuntimeObservation {
   bool running{false};
+  bool ready{false};
   std::string artifact;
   std::string runtime_id;
   bool managed{false};
   std::string workload_fingerprint;
+  std::string readiness_status;
 };
 
 // Version 1 runtime contract. Implementations must make activate and stop
 // idempotent and report the artifact reference used to create the workload.
+// The bounded overloads preserve compatibility with existing drivers while
+// allowing runtimes to enforce operation and readiness deadlines.
 class RuntimeDriver {
 public:
   virtual ~RuntimeDriver() = default;
@@ -59,6 +64,16 @@ public:
                                       const WorkloadSpec &spec) = 0;
   virtual RuntimeObservation stop() = 0;
   virtual RuntimeObservation inspect() = 0;
+
+  virtual void prepare(const std::string &artifact,
+                       std::chrono::milliseconds operation_timeout);
+  virtual RuntimeObservation
+  activate(const std::string &artifact, const WorkloadSpec &spec,
+           std::chrono::milliseconds operation_timeout,
+           std::chrono::milliseconds readiness_timeout);
+  virtual RuntimeObservation stop(std::chrono::milliseconds operation_timeout);
+  virtual RuntimeObservation
+  inspect(std::chrono::milliseconds operation_timeout);
 };
 
 class OciRuntimeDriver final : public RuntimeDriver {
@@ -70,6 +85,15 @@ public:
                               const WorkloadSpec &spec) override;
   RuntimeObservation stop() override;
   RuntimeObservation inspect() override;
+  void prepare(const std::string &artifact,
+               std::chrono::milliseconds operation_timeout) override;
+  RuntimeObservation
+  activate(const std::string &artifact, const WorkloadSpec &spec,
+           std::chrono::milliseconds operation_timeout,
+           std::chrono::milliseconds readiness_timeout) override;
+  RuntimeObservation stop(std::chrono::milliseconds operation_timeout) override;
+  RuntimeObservation
+  inspect(std::chrono::milliseconds operation_timeout) override;
 
 private:
   std::string executable_;

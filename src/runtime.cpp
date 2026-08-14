@@ -6,15 +6,19 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <iomanip>
+#include <poll.h>
 #include <regex>
 #include <set>
+#include <signal.h>
 #include <spawn.h>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -26,6 +30,7 @@ namespace {
 struct CommandResult {
   int exit_code;
   std::string output;
+  bool timed_out{false};
 };
 
 std::string trim(std::string value) {
@@ -40,7 +45,10 @@ std::string trim(std::string value) {
 }
 
 CommandResult run_command(const std::string &executable,
-                          const std::vector<std::string> &arguments) {
+                          const std::vector<std::string> &arguments,
+                          std::chrono::milliseconds timeout) {
+  if (timeout.count() <= 0)
+    throw std::invalid_argument("runtime operation timeout must be positive");
   std::array<int, 2> output_pipe{};
   if (pipe(output_pipe.data()) != 0)
     throw std::runtime_error("failed to create runtime output pipe: " +
@@ -67,9 +75,19 @@ CommandResult run_command(const std::string &executable,
     argv.push_back(item.data());
   argv.push_back(nullptr);
 
+  posix_spawnattr_t attributes;
+  if (posix_spawnattr_init(&attributes) != 0) {
+    posix_spawn_file_actions_destroy(&actions);
+    close(output_pipe[0]);
+    close(output_pipe[1]);
+    throw std::runtime_error("failed to initialize runtime process attributes");
+  }
+  posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+  posix_spawnattr_setpgroup(&attributes, 0);
   pid_t process = 0;
   const int spawn_result = posix_spawnp(&process, executable.c_str(), &actions,
-                                        nullptr, argv.data(), environ);
+                                        &attributes, argv.data(), environ);
+  posix_spawnattr_destroy(&attributes);
   posix_spawn_file_actions_destroy(&actions);
   close(output_pipe[1]);
   if (spawn_result != 0) {
@@ -78,8 +96,47 @@ CommandResult run_command(const std::string &executable,
                              "': " + std::to_string(spawn_result));
   }
 
+  const auto flags = fcntl(output_pipe[0], F_GETFL, 0);
+  if (flags >= 0)
+    fcntl(output_pipe[0], F_SETFL, flags | O_NONBLOCK);
   std::string output;
   std::array<char, 4096> buffer{};
+  int status = 0;
+  bool exited = false;
+  bool timed_out = false;
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (!exited) {
+    for (;;) {
+      const auto count = read(output_pipe[0], buffer.data(), buffer.size());
+      if (count > 0) {
+        output.append(buffer.data(), static_cast<std::size_t>(count));
+        continue;
+      }
+      if (count < 0 && errno == EINTR)
+        continue;
+      break;
+    }
+    const auto waited = waitpid(process, &status, WNOHANG);
+    if (waited == process) {
+      exited = true;
+      break;
+    }
+    if (waited < 0 && errno != EINTR) {
+      close(output_pipe[0]);
+      throw std::runtime_error("failed waiting for OCI runtime");
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      timed_out = true;
+      if (kill(-process, SIGKILL) != 0)
+        kill(process, SIGKILL);
+      while (waitpid(process, &status, 0) < 0 && errno == EINTR) {
+      }
+      exited = true;
+      break;
+    }
+    pollfd descriptor{output_pipe[0], POLLIN, 0};
+    poll(&descriptor, 1, 20);
+  }
   for (;;) {
     const auto count = read(output_pipe[0], buffer.data(), buffer.size());
     if (count > 0) {
@@ -91,17 +148,14 @@ CommandResult run_command(const std::string &executable,
     break;
   }
   close(output_pipe[0]);
-
-  int status = 0;
-  while (waitpid(process, &status, 0) < 0) {
-    if (errno != EINTR)
-      throw std::runtime_error("failed waiting for OCI runtime");
-  }
   const int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128;
-  return {exit_code, trim(std::move(output))};
+  return {exit_code, trim(std::move(output)), timed_out};
 }
 
 void require_success(const CommandResult &result, std::string_view operation) {
+  if (result.timed_out)
+    throw std::runtime_error("OCI runtime " + std::string(operation) +
+                             " timed out");
   if (result.exit_code == 0)
     return;
   const auto detail = result.output.empty()
@@ -109,6 +163,18 @@ void require_success(const CommandResult &result, std::string_view operation) {
                           : result.output;
   throw std::runtime_error("OCI runtime " + std::string(operation) +
                            " failed: " + detail);
+}
+
+std::chrono::milliseconds
+remaining_until(std::chrono::steady_clock::time_point deadline,
+                std::string_view operation) {
+  const auto now = std::chrono::steady_clock::now();
+  if (now >= deadline)
+    throw std::runtime_error("OCI runtime " + std::string(operation) +
+                             " timed out");
+  return std::max(
+      std::chrono::milliseconds(1),
+      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now));
 }
 
 void validate_executable(const std::string &value) {
@@ -138,6 +204,26 @@ std::uint64_t fnv1a(const std::string &value, std::uint64_t hash) {
   return hash;
 }
 } // namespace
+
+void RuntimeDriver::prepare(const std::string &artifact,
+                            std::chrono::milliseconds) {
+  prepare(artifact);
+}
+
+RuntimeObservation RuntimeDriver::activate(const std::string &artifact,
+                                           const WorkloadSpec &spec,
+                                           std::chrono::milliseconds,
+                                           std::chrono::milliseconds) {
+  return activate(artifact, spec);
+}
+
+RuntimeObservation RuntimeDriver::stop(std::chrono::milliseconds) {
+  return stop();
+}
+
+RuntimeObservation RuntimeDriver::inspect(std::chrono::milliseconds) {
+  return inspect();
+}
 
 const char *network_mode_name(NetworkMode mode) {
   switch (mode) {
@@ -267,19 +353,47 @@ OciRuntimeDriver::OciRuntimeDriver(std::string executable,
 }
 
 void OciRuntimeDriver::prepare(const std::string &artifact) {
-  require_success(run_command(executable_, {"pull", artifact}), "pull");
+  prepare(artifact, std::chrono::minutes(5));
+}
+
+void OciRuntimeDriver::prepare(const std::string &artifact,
+                               std::chrono::milliseconds operation_timeout) {
+  require_success(
+      run_command(executable_, {"pull", artifact}, operation_timeout), "pull");
 }
 
 RuntimeObservation OciRuntimeDriver::activate(const std::string &artifact,
                                               const WorkloadSpec &spec) {
+  return activate(artifact, spec, std::chrono::minutes(5),
+                  std::chrono::seconds(30));
+}
+
+RuntimeObservation
+OciRuntimeDriver::activate(const std::string &artifact,
+                           const WorkloadSpec &spec,
+                           std::chrono::milliseconds operation_timeout,
+                           std::chrono::milliseconds readiness_timeout) {
   validate_workload_spec(spec);
-  const auto existing = inspect();
+  if (operation_timeout.count() <= 0 || readiness_timeout.count() <= 0)
+    throw std::invalid_argument("runtime timeouts must be positive");
+  const auto operation_deadline =
+      std::chrono::steady_clock::now() + operation_timeout;
+  const auto existing =
+      inspect(remaining_until(operation_deadline, "activation"));
+  if (existing.running && existing.ready && existing.managed &&
+      existing.artifact == artifact &&
+      existing.workload_fingerprint == workload_fingerprint(spec))
+    return existing;
   if (!existing.artifact.empty() && !existing.managed)
     throw std::runtime_error("refusing to replace unmanaged container '" +
                              container_name_ + "'");
   // Removal is intentionally idempotent. A non-existent workload is expected
   // for the first deployment and does not make activation fail.
-  run_command(executable_, {"rm", "--force", container_name_});
+  const auto removal =
+      run_command(executable_, {"rm", "--force", container_name_},
+                  remaining_until(operation_deadline, "activation"));
+  if (removal.timed_out)
+    require_success(removal, "activation cleanup");
   std::vector<std::string> arguments{
       "run",       "--detach",
       "--name",    container_name_,
@@ -304,26 +418,54 @@ RuntimeObservation OciRuntimeDriver::activate(const std::string &artifact,
   }
   arguments.push_back(artifact);
   arguments.insert(arguments.end(), spec.command.begin(), spec.command.end());
-  require_success(run_command(executable_, arguments), "activation");
-  const auto observed = inspect();
-  if (!observed.running || !observed.managed || observed.artifact != artifact ||
-      observed.workload_fingerprint != workload_fingerprint(spec))
-    throw std::runtime_error(
-        "OCI runtime did not activate the requested digest");
-  return observed;
+  require_success(
+      run_command(executable_, arguments,
+                  remaining_until(operation_deadline, "activation")),
+      "activation");
+  const auto readiness_deadline = std::min(
+      operation_deadline, std::chrono::steady_clock::now() + readiness_timeout);
+  for (;;) {
+    const auto observed =
+        inspect(remaining_until(readiness_deadline, "readiness"));
+    if (!observed.running || !observed.managed ||
+        observed.artifact != artifact ||
+        observed.workload_fingerprint != workload_fingerprint(spec))
+      throw std::runtime_error(
+          "OCI runtime observation does not match the requested workload: "
+          "running=" +
+          std::string(observed.running ? "true" : "false") +
+          ", ready=" + (observed.ready ? "true" : "false") +
+          ", managed=" + (observed.managed ? "true" : "false") +
+          ", artifact='" + observed.artifact + "', readiness='" +
+          observed.readiness_status + "'");
+    if (observed.ready)
+      return observed;
+    if (observed.readiness_status == "unhealthy")
+      throw std::runtime_error("OCI workload reported unhealthy");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 }
 
 RuntimeObservation OciRuntimeDriver::stop() {
-  const auto existing = inspect();
+  return stop(std::chrono::minutes(5));
+}
+
+RuntimeObservation
+OciRuntimeDriver::stop(std::chrono::milliseconds operation_timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + operation_timeout;
+  const auto existing = inspect(remaining_until(deadline, "stop"));
   if (existing.artifact.empty())
     return {};
   if (!existing.managed)
     throw std::runtime_error("refusing to stop unmanaged container '" +
                              container_name_ + "'");
   const auto result =
-      run_command(executable_, {"rm", "--force", container_name_});
+      run_command(executable_, {"rm", "--force", container_name_},
+                  remaining_until(deadline, "stop"));
+  if (result.timed_out)
+    require_success(result, "stop");
   if (result.exit_code != 0) {
-    const auto observed = inspect();
+    const auto observed = inspect(remaining_until(deadline, "stop"));
     if (observed.running)
       require_success(result, "stop");
   }
@@ -331,13 +473,23 @@ RuntimeObservation OciRuntimeDriver::stop() {
 }
 
 RuntimeObservation OciRuntimeDriver::inspect() {
-  const auto result = run_command(
-      executable_, {"inspect", "--format",
-                    "{{.Config.Image}}|{{.Id}}|"
-                    "{{index .Config.Labels \"io.vektor.managed\"}}|"
-                    "{{.State.Running}}|"
-                    "{{index .Config.Labels \"io.vektor.workload\"}}",
-                    container_name_});
+  return inspect(std::chrono::seconds(30));
+}
+
+RuntimeObservation
+OciRuntimeDriver::inspect(std::chrono::milliseconds operation_timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + operation_timeout;
+  const auto result =
+      run_command(executable_,
+                  {"inspect", "--format",
+                   "{{.Config.Image}}|{{.Id}}|"
+                   "{{index .Config.Labels \"io.vektor.managed\"}}|"
+                   "{{.State.Running}}|"
+                   "{{index .Config.Labels \"io.vektor.workload\"}}",
+                   container_name_},
+                  remaining_until(deadline, "inspection"));
+  if (result.timed_out)
+    require_success(result, "inspection");
   if (result.exit_code != 0)
     return {};
   const auto first = result.output.find('|');
@@ -348,11 +500,27 @@ RuntimeObservation OciRuntimeDriver::inspect() {
       third == std::string::npos || fourth == std::string::npos)
     throw std::runtime_error(
         "OCI runtime returned an invalid inspection result");
-  return {result.output.substr(third + 1, fourth - third - 1) == "true",
+  const auto health = run_command(
+      executable_,
+      {"inspect", "--format", "{{.State.Health.Status}}", container_name_},
+      remaining_until(deadline, "health inspection"));
+  if (health.timed_out)
+    require_success(health, "health inspection");
+  const auto readiness =
+      health.exit_code == 0 &&
+              (health.output == "starting" || health.output == "healthy" ||
+               health.output == "unhealthy")
+          ? health.output
+          : "none";
+  const auto running =
+      result.output.substr(third + 1, fourth - third - 1) == "true";
+  return {running,
+          running && (readiness == "none" || readiness == "healthy"),
           result.output.substr(0, first),
           result.output.substr(first + 1, second - first - 1),
           result.output.substr(second + 1, third - second - 1) == "true",
-          result.output.substr(fourth + 1)};
+          result.output.substr(fourth + 1),
+          readiness};
 }
 
 } // namespace vektor
