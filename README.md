@@ -223,6 +223,30 @@ mismatch, or invalid signature fails preparation before the container runtime
 is called. Successful status records expose the verification method, signer,
 issuer, and timestamp through deployment API schema v5.
 
+Plain-HTTP registries and signatures without transparency-log verification are
+disabled by default. A self-managed public-key policy can opt into
+`allow_http_registry: true` and `ignore_transparency_log: true` for an isolated
+test or private registry. VEKTOR rejects both exceptions in keyless mode; do not
+use them for internet-facing production registries.
+
+CI also exercises Cosign against a real ephemeral OCI registry. To run that
+suite yourself, provide a registry and Cosign, prepare the fixtures, then enable
+the integration target:
+
+```bash
+VEKTOR_TEST_REGISTRY=registry:5000 \
+  bash scripts/prepare-trust-integration.sh /tmp/vektor-trust.env
+source /tmp/vektor-trust.env
+colcon build --cmake-args -DVEKTOR_ENABLE_TRUST_INTEGRATION_TESTS=ON
+colcon test --packages-select vektor --ctest-args -R test_trust_integration
+colcon test-result --verbose
+```
+
+The suite proves that a trusted signed digest succeeds while an unsigned
+digest, a trusted signature checked with the wrong key, and a tag moved to new
+content after signing all fail closed. Deployment commands still require digest
+pins; the tag-tampering case independently checks Cosign's content binding.
+
 ### Deployment audit log
 
 Every agent writes append-only JSON Lines audit records to
@@ -356,9 +380,10 @@ Milestones 1–5 provide checks, status snapshots, the mutually authenticated
 machine agent, fleet aggregation, and health-gated OCI rollouts. VEKTOR has now
 completed v0.6 Reconcile: applying the desired artifact to the actual machine
 runtime, verifying the observed digest and health, detecting drift, and safely
-recovering or rolling back after failures. The current focus is v0.7 Trust:
-artifact identity, policy enforcement, provenance, and auditability. Access
-control and production hardening follow in v0.8–v0.9. See `ROADMAP.md`.
+recovering or rolling back after failures. VEKTOR has also completed v0.7 Trust:
+artifact identity, policy enforcement, provenance, auditability, and real OCI
+negative integration coverage. The current focus is v0.8 Control, followed by
+production hardening in v0.9. See `ROADMAP.md`.
 
 ## Contributing and security
 

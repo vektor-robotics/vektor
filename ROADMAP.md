@@ -75,7 +75,7 @@ The v0.6 reconciliation milestone is complete. The two-agent integration suite
 now exercises those boundaries through the fleet and agent gRPC APIs, including
 bounded runtime failure and reverse-order recovery.
 
-## Current focus
+## Completed milestone
 
 ### v0.7 — Trust
 
@@ -85,9 +85,13 @@ Verify artifact identity and make every deployment decision attributable.
 - [x] Configurable trust policy enforced before preparation
 - [x] Append-only structured audit events for operator and agent actions
 - [x] Artifact provenance surfaced in deployment status
-- [ ] Complete negative integration tests for unsigned, untrusted, and tampered artifacts
+- [x] Complete negative integration tests for unsigned, untrusted, and tampered artifacts
 
-## Planned
+The v0.7 trust milestone is complete. CI now verifies real Cosign signatures
+against an ephemeral OCI registry and proves that unsigned content, signatures
+checked with an untrusted key, and tags moved after signing all fail closed.
+
+## Current focus
 
 ### v0.8 — Control
 
@@ -98,6 +102,8 @@ Add production access controls and operational safety boundaries.
 - Approval policy for sensitive environments and large rollout waves
 - Credential and certificate rotation guidance
 - Stable, machine-readable authorization failures
+
+## Planned
 
 ### v0.9 — Harden
 
@@ -115,5 +121,5 @@ Stable compatibility guarantees for the agent API, configuration schemas, CLI
 automation output, deployment state, and supported runtime-driver interface.
 
 The ordering may change when field testing reveals a higher-risk gap. With
-end-to-end runtime reconciliation complete, v0.7 artifact trust and auditability
-are the next milestone.
+runtime reconciliation and artifact trust complete, v0.8 access control is the
+next milestone.

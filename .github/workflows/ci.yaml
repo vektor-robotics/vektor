@@ -37,3 +37,54 @@ jobs:
           source install/setup.bash
           colcon test --packages-select vektor --event-handlers console_direct+
           colcon test-result --verbose
+
+  artifact-trust:
+    name: Real OCI artifact trust
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base-noble
+    services:
+      registry:
+        image: registry:2.8.3
+        ports:
+          - 5000:5000
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y curl gettext-base ros-dev-tools libyaml-cpp-dev \
+            libprotobuf-dev protobuf-compiler libgrpc++-dev protobuf-compiler-grpc
+          rosdep update
+          rosdep install --from-paths . --ignore-src -r -y --skip-keys grpc
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.0
+        with:
+          cosign-release: v3.0.6
+
+      - name: Prepare signed and negative fixtures
+        shell: bash
+        run: bash scripts/prepare-trust-integration.sh /tmp/vektor-trust.env
+
+      - name: Build with real trust tests
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --event-handlers console_direct+ \
+            --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DVEKTOR_ENABLE_TRUST_INTEGRATION_TESTS=ON
+
+      - name: Test real Cosign verification
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          source /tmp/vektor-trust.env
+          colcon test --packages-select vektor \
+            --ctest-args -R test_trust_integration \
+            --event-handlers console_direct+
+          colcon test-result --verbose

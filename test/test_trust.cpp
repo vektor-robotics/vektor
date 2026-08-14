@@ -71,6 +71,56 @@ TEST(TrustPolicy, RejectsMixedAndUnknownPolicyFields) {
   EXPECT_THROW(vektor::load_trust_policy(files.policy), std::runtime_error);
 }
 
+TEST(TrustPolicy, LoadsExplicitPrivateRegistryControls) {
+  TrustFiles files;
+  {
+    std::ofstream policy(files.policy);
+    policy << "schema_version: 1\nmode: public_key\nkey: cosign.pub\n"
+              "allow_http_registry: true\n"
+              "ignore_transparency_log: true\n";
+  }
+
+  const auto loaded = vektor::load_trust_policy(files.policy);
+  EXPECT_TRUE(loaded.allow_http_registry);
+  EXPECT_TRUE(loaded.ignore_transparency_log);
+}
+
+TEST(TrustPolicy, KeepsPrivateRegistryControlsSecureByDefault) {
+  TrustFiles files;
+  {
+    std::ofstream policy(files.policy);
+    policy << "schema_version: 1\nmode: public_key\nkey: cosign.pub\n";
+  }
+
+  const auto loaded = vektor::load_trust_policy(files.policy);
+  EXPECT_FALSE(loaded.allow_http_registry);
+  EXPECT_FALSE(loaded.ignore_transparency_log);
+}
+
+TEST(TrustPolicy, RejectsWeakenedKeylessPolicy) {
+  TrustFiles files;
+  {
+    std::ofstream policy(files.policy);
+    policy << "schema_version: 1\nmode: keyless\n"
+              "certificate_identity: release@example.com\n"
+              "certificate_oidc_issuer: https://issuer.example.com\n"
+              "ignore_transparency_log: true\n";
+  }
+
+  EXPECT_THROW(vektor::load_trust_policy(files.policy), std::runtime_error);
+}
+
+TEST(CosignVerifier, RejectsWeakenedKeylessPolicyConstructedInCode) {
+  vektor::TrustPolicy policy;
+  policy.mode = vektor::TrustMode::Keyless;
+  policy.certificate_identity = "release@example.com";
+  policy.certificate_oidc_issuer = "https://issuer.example.com";
+  policy.ignore_transparency_log = true;
+
+  EXPECT_THROW(vektor::CosignArtifactVerifier(std::move(policy)),
+               std::invalid_argument);
+}
+
 TEST(CosignVerifier, EnforcesPublicKeyAndRecordsProvenance) {
   TrustFiles files;
   {
@@ -84,6 +134,8 @@ TEST(CosignVerifier, EnforcesPublicKeyAndRecordsProvenance) {
   policy.mode = vektor::TrustMode::PublicKey;
   policy.cosign_executable = "./" + files.executable.string();
   policy.key = files.key.string();
+  policy.allow_http_registry = true;
+  policy.ignore_transparency_log = true;
   vektor::CosignArtifactVerifier verifier(policy);
 
   const auto result = verifier.verify(kArtifact, std::chrono::seconds(1));
@@ -96,6 +148,8 @@ TEST(CosignVerifier, EnforcesPublicKeyAndRecordsProvenance) {
   EXPECT_NE(recorded.find("verify\n--key\n" + files.key.string()),
             std::string::npos);
   EXPECT_NE(recorded.find(kArtifact), std::string::npos);
+  EXPECT_NE(recorded.find("--allow-http-registry"), std::string::npos);
+  EXPECT_NE(recorded.find("--insecure-ignore-tlog"), std::string::npos);
 }
 
 TEST(CosignVerifier, EnforcesKeylessIdentityAndIssuer) {
