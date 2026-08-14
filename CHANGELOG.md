@@ -29,6 +29,10 @@ All notable changes to VEKTOR are documented here.
   method, signer, issuer, and timestamp provenance.
 - Negative trust tests for malformed policy, rejected signatures, and verifier
   timeouts, including proof that rejected artifacts never reach the runtime.
+- Durable append-only JSON Lines audit events for attributed operator requests,
+  artifact verification, runtime preparation, drift, and restart recovery.
+- Fail-closed audit persistence that prevents runtime mutation when the agent
+  cannot durably record the initiating event.
 
 ## [0.5.0] - 2026-08-14
 

@@ -28,6 +28,7 @@ struct AgentOptions {
   std::optional<std::filesystem::path> tls_private_key;
   std::optional<std::filesystem::path> tls_client_ca;
   std::filesystem::path deployment_state_path{".vektor/deployment.yaml"};
+  std::filesystem::path audit_log_path{".vektor/audit.jsonl"};
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy_path;

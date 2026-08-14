@@ -83,7 +83,7 @@ Verify artifact identity and make every deployment decision attributable.
 
 - [x] Keyless and public-key OCI signature verification
 - [x] Configurable trust policy enforced before preparation
-- [ ] Append-only structured audit events for operator and agent actions
+- [x] Append-only structured audit events for operator and agent actions
 - [x] Artifact provenance surfaced in deployment status
 - [ ] Complete negative integration tests for unsigned, untrusted, and tampered artifacts
 

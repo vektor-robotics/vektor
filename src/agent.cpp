@@ -83,6 +83,17 @@ bool health_ready(HealthState state, bool allow_degraded) {
   return state == HealthState::Healthy ||
          (allow_degraded && state == HealthState::Degraded);
 }
+
+std::string audit_actor(const grpc::ServerContext &context) {
+  const auto authentication = context.auth_context();
+  if (authentication && authentication->IsPeerAuthenticated()) {
+    const auto identities = authentication->GetPeerIdentity();
+    if (!identities.empty())
+      return "mtls:" +
+             std::string(identities.front().data(), identities.front().size());
+  }
+  return "unauthenticated:" + context.peer();
+}
 } // namespace
 
 void validate_agent_options(const AgentOptions &options) {
@@ -92,6 +103,8 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("agent interval must be greater than zero");
   if (options.deployment_state_path.empty())
     throw std::invalid_argument("deployment state path cannot be empty");
+  if (options.audit_log_path.empty())
+    throw std::invalid_argument("audit log path cannot be empty");
   if (options.oci_runtime.empty())
     throw std::invalid_argument("OCI runtime cannot be empty");
   if (!is_valid_runtime_container_name(options.runtime_container))
@@ -192,7 +205,7 @@ GrpcAgentService::GetStatus(grpc::ServerContext *,
 }
 
 grpc::Status GrpcAgentService::PrepareDeployment(
-    grpc::ServerContext *,
+    grpc::ServerContext *context,
     const vektor::agent::v1::PrepareDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
   if (!deployment_state_)
@@ -206,7 +219,8 @@ grpc::Status GrpcAgentService::PrepareDeployment(
         request_timeout(request->operation_timeout_ms(),
                         std::chrono::minutes(5), "operation_timeout_ms");
     *response = to_proto(deployment_state_->prepare(
-        request->deployment_id(), request->artifact(), workload, timeout));
+        request->deployment_id(), request->artifact(), workload, timeout,
+        audit_actor(*context)));
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -232,7 +246,8 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     const auto before = state_.latest();
     const auto after_sequence = before ? before->sequence : 0;
     const auto record = deployment_state_->activate(
-        request->deployment_id(), operation_timeout, readiness_timeout);
+        request->deployment_id(), operation_timeout, readiness_timeout,
+        audit_actor(*context));
     const auto fresh =
         state_.wait_for_change(after_sequence, readiness_timeout);
     if (context->IsCancelled())
@@ -253,7 +268,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
   } catch (const std::exception &error) {
     try {
       deployment_state_->fail_activation(request->deployment_id(),
-                                         error.what());
+                                         error.what(), audit_actor(*context));
     } catch (...) {
     }
     return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
@@ -261,7 +276,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
 }
 
 grpc::Status GrpcAgentService::RollbackDeployment(
-    grpc::ServerContext *,
+    grpc::ServerContext *context,
     const vektor::agent::v1::RollbackDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
   if (!deployment_state_)
@@ -272,7 +287,8 @@ grpc::Status GrpcAgentService::RollbackDeployment(
         request_timeout(request->operation_timeout_ms(),
                         std::chrono::minutes(5), "operation_timeout_ms");
     *response = to_proto(
-        deployment_state_->rollback(request->deployment_id(), timeout));
+        deployment_state_->rollback(request->deployment_id(), timeout,
+                                    audit_actor(*context)));
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -321,8 +337,10 @@ int AgentRunner::run() {
   if (options_.trust_policy_path)
     verifier = std::make_shared<CosignArtifactVerifier>(
         load_trust_policy(*options_.trust_policy_path));
+  auto audit = std::make_shared<JsonLinesAuditLog>(options_.audit_log_path);
   AgentDeploymentState deployment_state(
-      options_.deployment_state_path, std::move(runtime), std::move(verifier));
+      options_.deployment_state_path, std::move(runtime), std::move(verifier),
+      std::move(audit));
   if (deployment_state.current().phase != DeploymentPhase::Idle ||
       deployment_state.current().operation != ReconciliationOperation::None) {
     const auto restored = deployment_state.refresh_observed();
@@ -380,9 +398,16 @@ int AgentRunner::run() {
       if (deployment_state.current().phase != DeploymentPhase::Idle ||
           deployment_state.current().operation !=
               ReconciliationOperation::None) {
-        const auto deployment = deployment_state.refresh_observed();
-        if (deployment.drift_detected)
-          RCLCPP_ERROR(node_->get_logger(), "%s", deployment.message.c_str());
+        try {
+          const auto deployment = deployment_state.refresh_observed();
+          if (deployment.drift_detected)
+            RCLCPP_ERROR(node_->get_logger(), "%s",
+                         deployment.message.c_str());
+        } catch (const std::exception &error) {
+          RCLCPP_ERROR(node_->get_logger(),
+                       "deployment observation or audit failed: %s",
+                       error.what());
+        }
       }
 
       const auto next_run = started_at + options_.interval;

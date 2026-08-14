@@ -35,6 +35,7 @@ struct CliOptions {
   std::vector<std::string> selectors;
   std::optional<std::size_t> limit;
   std::filesystem::path deployment_state{".vektor/deployment.yaml"};
+  std::filesystem::path audit_log{".vektor/audit.jsonl"};
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy;
@@ -58,6 +59,7 @@ struct CliOptions {
             << "                [--oci-runtime docker|podman] "
                "[--runtime-container <name>] "
                "[--deployment-state <path>] "
+               "[--audit-log <path>] "
                "[--trust-policy <path>]\n"
             << "  vektor fleet  --config <path> [--format text|json] "
                "[--selector key=value]...\n"
@@ -125,6 +127,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.tls_client_ca = next_value(index, argc, argv, argument);
     else if (argument == "--deployment-state")
       options.deployment_state = next_value(index, argc, argv, argument);
+    else if (argument == "--audit-log")
+      options.audit_log = next_value(index, argc, argv, argument);
     else if (argument == "--oci-runtime")
       options.oci_runtime = next_value(index, argc, argv, argument);
     else if (argument == "--runtime-container")
@@ -161,6 +165,7 @@ CliOptions parse_cli(int argc, char **argv) {
        !options.history || options.insecure || options.tls_certificate ||
        options.tls_private_key || options.tls_client_ca ||
        options.deployment_state != ".vektor/deployment.yaml" ||
+       options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
        options.runtime_container != "vektor-workload" || options.trust_policy ||
        options.listen_address != "127.0.0.1:50051" ||
@@ -170,6 +175,7 @@ CliOptions parse_cli(int argc, char **argv) {
       (options.insecure || options.tls_certificate || options.tls_private_key ||
        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
        options.deployment_state != ".vektor/deployment.yaml" ||
+       options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" || !options.selectors.empty() ||
        options.runtime_container != "vektor-workload" || options.trust_policy ||
        options.limit))
@@ -183,6 +189,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.insecure || options.tls_certificate || options.tls_private_key ||
        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
        options.deployment_state != ".vektor/deployment.yaml" ||
+       options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
        options.runtime_container != "vektor-workload" || options.trust_policy))
     usage_error("option is not supported by fleet");
@@ -196,6 +203,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.listen_address != "127.0.0.1:50051" ||
        !options.selectors.empty() || options.limit ||
        options.deployment_state != ".vektor/deployment.yaml" ||
+       options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
        options.runtime_container != "vektor-workload" || options.trust_policy ||
        options.interval != std::chrono::milliseconds(5000)))
@@ -266,6 +274,7 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   agent_options.tls_private_key = options.tls_private_key;
   agent_options.tls_client_ca = options.tls_client_ca;
   agent_options.deployment_state_path = options.deployment_state;
+  agent_options.audit_log_path = options.audit_log;
   agent_options.oci_runtime = options.oci_runtime;
   agent_options.runtime_container = options.runtime_container;
   agent_options.trust_policy_path = options.trust_policy;
