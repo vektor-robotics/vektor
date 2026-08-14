@@ -254,6 +254,8 @@ response_operation_name(vektor::agent::v1::ReconciliationOperation operation) {
   switch (operation) {
   case vektor::agent::v1::RECONCILIATION_OPERATION_NONE:
     return "none";
+  case vektor::agent::v1::RECONCILIATION_OPERATION_VERIFYING:
+    return "verifying";
   case vektor::agent::v1::RECONCILIATION_OPERATION_PREPARING:
     return "preparing";
   case vektor::agent::v1::RECONCILIATION_OPERATION_ACTIVATING:
@@ -329,7 +331,7 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     vektor::agent::v1::DeploymentRecord recovery_response;
     const auto recovery_status = stub->GetDeployment(
         &recovery_context, recovery_request, &recovery_response);
-    if (recovery_status.ok() && recovery_response.schema_version() == 4 &&
+    if (recovery_status.ok() && recovery_response.schema_version() == 5 &&
         recovery_response.deployment_id() == rollout.deployment_id)
       return {robot.id, false, failure,
               response_phase_name(recovery_response.phase()),
@@ -337,7 +339,7 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
                   recovery_response.reconciliation_operation())};
     return {robot.id, false, failure};
   }
-  if (response.schema_version() != 4 ||
+  if (response.schema_version() != 5 ||
       response.deployment_id() != rollout.deployment_id)
     return {robot.id, false, "invalid deployment response from agent"};
   if (action == RpcAction::Prepare &&

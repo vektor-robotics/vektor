@@ -23,6 +23,12 @@ All notable changes to VEKTOR are documented here.
 - Rollout JSON schema v2 with per-robot phase and operation fields.
 - Deterministic two-robot integration coverage for runtime timeout, interrupted
   activation recovery, manually introduced drift, and reverse-order rollback.
+- Strict versioned trust policies with bounded Cosign public-key and keyless
+  verification before OCI artifact preparation.
+- Deployment API and persisted-state schema v5 with artifact verification
+  method, signer, issuer, and timestamp provenance.
+- Negative trust tests for malformed policy, rejected signatures, and verifier
+  timeouts, including proof that rejected artifacts never reach the runtime.
 
 ## [0.5.0] - 2026-08-14
 

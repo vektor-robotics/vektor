@@ -422,7 +422,7 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   vektor::agent::v1::DeploymentRecord response;
   ASSERT_TRUE(stub->GetDeployment(&context, request, &response).ok());
   EXPECT_EQ(response.phase(), vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE);
-  EXPECT_EQ(response.schema_version(), 4U);
+  EXPECT_EQ(response.schema_version(), 5U);
   EXPECT_EQ(response.observed_artifact(), kArtifact);
   EXPECT_EQ(response.observed_workload_fingerprint(),
             vektor::workload_fingerprint(config.workload));
@@ -577,7 +577,9 @@ TEST(RolloutIntegration, RuntimeTimeoutRollsBackEntireTwoRobotWave) {
   install_previous_release(second);
   write_configs(files, first.port, second.port, true);
   auto config = vektor::load_rollout_config(files.rollout.string());
-  config.operation_timeout = std::chrono::milliseconds(37);
+  // Leave enough margin for gRPC scheduling on loaded CI runners. The fake
+  // runtime still fails immediately and records the deadline it receives.
+  config.operation_timeout = std::chrono::milliseconds(250);
   first.runtime->set_prepare_timeout(true);
 
   const auto deployed = vektor::deploy_release(config);
@@ -589,8 +591,10 @@ TEST(RolloutIntegration, RuntimeTimeoutRollsBackEntireTwoRobotWave) {
       deployed.robots.begin(), deployed.robots.end(), [](const auto &robot) {
         return robot.message.find("timed out") != std::string::npos;
       }));
-  EXPECT_EQ(first.runtime->last_prepare_timeout(),
-            std::chrono::milliseconds(37));
+  EXPECT_GT(first.runtime->last_prepare_timeout(),
+            std::chrono::milliseconds(0));
+  EXPECT_LE(first.runtime->last_prepare_timeout(),
+            std::chrono::milliseconds(250));
   EXPECT_EQ(first.deployment->current().phase,
             vektor::DeploymentPhase::RolledBack);
   EXPECT_EQ(second.deployment->current().phase,

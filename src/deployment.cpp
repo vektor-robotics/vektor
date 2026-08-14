@@ -52,6 +52,8 @@ DeploymentPhase parse_phase(const std::string &value) {
 ReconciliationOperation parse_operation(const std::string &value) {
   if (value == "none")
     return ReconciliationOperation::None;
+  if (value == "verifying")
+    return ReconciliationOperation::Verifying;
   if (value == "preparing")
     return ReconciliationOperation::Preparing;
   if (value == "activating")
@@ -83,6 +85,8 @@ proto_operation(ReconciliationOperation operation) {
   switch (operation) {
   case ReconciliationOperation::None:
     return vektor::agent::v1::RECONCILIATION_OPERATION_NONE;
+  case ReconciliationOperation::Verifying:
+    return vektor::agent::v1::RECONCILIATION_OPERATION_VERIFYING;
   case ReconciliationOperation::Preparing:
     return vektor::agent::v1::RECONCILIATION_OPERATION_PREPARING;
   case ReconciliationOperation::Activating:
@@ -164,6 +168,29 @@ void emit_workload(YAML::Emitter &output, const char *key,
   output << YAML::EndSeq << YAML::EndMap;
 }
 
+ArtifactVerification load_verification(const YAML::Node &node) {
+  ArtifactVerification verification;
+  if (!node)
+    return verification;
+  verification.verified = node["verified"].as<bool>(false);
+  verification.method = node["method"].as<std::string>("");
+  verification.signer = node["signer"].as<std::string>("");
+  verification.issuer = node["issuer"].as<std::string>("");
+  verification.verified_at = node["verified_at"].as<std::string>("");
+  return verification;
+}
+
+void emit_verification(YAML::Emitter &output, const char *key,
+                       const ArtifactVerification &verification) {
+  output << YAML::Key << key << YAML::Value << YAML::BeginMap << YAML::Key
+         << "verified" << YAML::Value << verification.verified << YAML::Key
+         << "method" << YAML::Value << verification.method << YAML::Key
+         << "signer" << YAML::Value << verification.signer << YAML::Key
+         << "issuer" << YAML::Value << verification.issuer << YAML::Key
+         << "verified_at" << YAML::Value << verification.verified_at
+         << YAML::EndMap;
+}
+
 vektor::agent::v1::RuntimeNetworkMode proto_network(NetworkMode mode) {
   switch (mode) {
   case NetworkMode::Host:
@@ -197,6 +224,8 @@ const char *reconciliation_operation_name(ReconciliationOperation operation) {
   switch (operation) {
   case ReconciliationOperation::None:
     return "none";
+  case ReconciliationOperation::Verifying:
+    return "verifying";
   case ReconciliationOperation::Preparing:
     return "preparing";
   case ReconciliationOperation::Activating:
@@ -218,14 +247,19 @@ bool is_pinned_oci_artifact(const std::string &artifact) {
 }
 
 AgentDeploymentState::AgentDeploymentState(
-    std::filesystem::path state_path, std::shared_ptr<RuntimeDriver> runtime)
-    : state_path_(std::move(state_path)), runtime_(std::move(runtime)) {
+    std::filesystem::path state_path, std::shared_ptr<RuntimeDriver> runtime,
+    std::shared_ptr<ArtifactVerifier> verifier)
+    : state_path_(std::move(state_path)), runtime_(std::move(runtime)),
+      verifier_(std::move(verifier)) {
   if (state_path_.empty())
     throw std::invalid_argument("deployment state path cannot be empty");
   if (!runtime_)
     throw std::invalid_argument("deployment runtime driver is required");
   if (runtime_->interface_version() != 1)
     throw std::invalid_argument("unsupported runtime driver interface version");
+  if (verifier_ && verifier_->interface_version() != 1)
+    throw std::invalid_argument(
+        "unsupported artifact verifier interface version");
   load();
 }
 
@@ -238,7 +272,7 @@ void AgentDeploymentState::load() {
     if (!root.IsMap())
       throw std::runtime_error("deployment state must be a mapping");
     const auto schema_version = root["schema_version"].as<unsigned int>();
-    if (schema_version < 1 || schema_version > 4)
+    if (schema_version < 1 || schema_version > 5)
       throw std::runtime_error("unsupported deployment state schema");
     record_.deployment_id = root["deployment_id"].as<std::string>();
     record_.artifact = root["artifact"].as<std::string>();
@@ -267,6 +301,11 @@ void AgentDeploymentState::load() {
       record_.operation_attempt =
           root["operation_attempt"].as<std::uint64_t>(0);
     }
+    if (schema_version >= 5) {
+      record_.verification = load_verification(root["verification"]);
+      record_.previous_verification =
+          load_verification(root["previous_verification"]);
+    }
     record_.phase = parse_phase(root["phase"].as<std::string>());
     record_.message = root["message"].as<std::string>();
     record_.updated_at = root["updated_at"].as<std::string>();
@@ -281,13 +320,16 @@ void AgentDeploymentState::persist_locked() const {
   if (!parent.empty())
     std::filesystem::create_directories(parent);
   YAML::Emitter output;
-  output << YAML::BeginMap << YAML::Key << "schema_version" << YAML::Value << 4
+  output << YAML::BeginMap << YAML::Key << "schema_version" << YAML::Value << 5
          << YAML::Key << "deployment_id" << YAML::Value << record_.deployment_id
          << YAML::Key << "artifact" << YAML::Value << record_.artifact
          << YAML::Key << "previous_artifact" << YAML::Value
          << record_.previous_artifact;
   emit_workload(output, "workload", record_.workload);
   emit_workload(output, "previous_workload", record_.previous_workload);
+  emit_verification(output, "verification", record_.verification);
+  emit_verification(output, "previous_verification",
+                    record_.previous_verification);
   output << YAML::Key << "observed_artifact" << YAML::Value
          << record_.observed_artifact << YAML::Key
          << "observed_workload_fingerprint" << YAML::Value
@@ -340,7 +382,8 @@ DeploymentRecord AgentDeploymentState::prepare(
   if (record_.deployment_id == deployment_id && record_.artifact == artifact &&
       record_.workload == workload &&
       (record_.phase == DeploymentPhase::Staged ||
-       record_.phase == DeploymentPhase::Active))
+       record_.phase == DeploymentPhase::Active) &&
+      (!verifier_ || record_.verification.verified))
     return record_;
   if (record_.phase == DeploymentPhase::Staged)
     throw std::runtime_error("another deployment is already staged");
@@ -354,17 +397,52 @@ DeploymentRecord AgentDeploymentState::prepare(
       current_is_rollback_target ? record_.artifact : record_.previous_artifact;
   const auto previous_workload =
       current_is_rollback_target ? record_.workload : record_.previous_workload;
+  const auto previous_verification = current_is_rollback_target
+                                         ? record_.verification
+                                         : record_.previous_verification;
   record_.deployment_id = deployment_id;
   record_.artifact = artifact;
   record_.previous_artifact = previous;
   record_.workload = std::move(workload);
   record_.previous_workload = previous_workload;
+  record_.verification = {};
+  record_.previous_verification = previous_verification;
+  const auto deadline = std::chrono::steady_clock::now() + operation_timeout;
+  const auto remaining = [&] {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline)
+      throw std::runtime_error("deployment preparation timed out");
+    return std::max(
+        std::chrono::milliseconds(1),
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now));
+  };
+  if (verifier_) {
+    record_.message = "verifying artifact trust policy";
+    begin_operation_locked(ReconciliationOperation::Verifying);
+    persist_locked();
+    try {
+      lock.unlock();
+      const auto verification = verifier_->verify(artifact, remaining());
+      lock.lock();
+      if (!verification.verified)
+        throw std::runtime_error("verifier returned an unverified result");
+      record_.verification = verification;
+      complete_operation_locked();
+    } catch (const std::exception &error) {
+      if (!lock.owns_lock())
+        lock.lock();
+      record_failure_locked(std::string("artifact verification failed: ") +
+                            error.what());
+      persist_locked();
+      throw;
+    }
+  }
   record_.message = "preparing artifact";
   begin_operation_locked(ReconciliationOperation::Preparing);
   persist_locked();
   try {
     lock.unlock();
-    runtime_->prepare(artifact, operation_timeout);
+    runtime_->prepare(artifact, remaining());
     lock.lock();
   } catch (const std::exception &error) {
     if (!lock.owns_lock())
@@ -438,6 +516,7 @@ AgentDeploymentState::rollback(const std::string &deployment_id,
   const auto target_workload = record_.previous_workload;
   record_.artifact = target;
   record_.workload = target_workload;
+  record_.verification = record_.previous_verification;
   begin_operation_locked(ReconciliationOperation::RollingBack);
   record_.message = "reconciling rollback target";
   persist_locked();
@@ -554,7 +633,9 @@ void AgentDeploymentState::recover_interrupted_locked(
     record_.message =
         "interrupted activation observed; retry activation for ROS readiness";
   } else {
-    record_.drift_detected = interrupted != ReconciliationOperation::Preparing;
+    record_.drift_detected =
+        interrupted != ReconciliationOperation::Preparing &&
+        interrupted != ReconciliationOperation::Verifying;
     record_.phase = DeploymentPhase::Failed;
     record_.message = std::string("interrupted ") +
                       reconciliation_operation_name(interrupted) +
@@ -605,7 +686,7 @@ DeploymentRecord AgentDeploymentState::current() const {
 
 vektor::agent::v1::DeploymentRecord to_proto(const DeploymentRecord &record) {
   vektor::agent::v1::DeploymentRecord result;
-  result.set_schema_version(4);
+  result.set_schema_version(5);
   result.set_deployment_id(record.deployment_id);
   result.set_artifact(record.artifact);
   result.set_previous_artifact(record.previous_artifact);
@@ -627,6 +708,11 @@ vektor::agent::v1::DeploymentRecord to_proto(const DeploymentRecord &record) {
   result.set_reconciliation_operation(proto_operation(record.operation));
   result.set_operation_started_at(record.operation_started_at);
   result.set_operation_attempt(record.operation_attempt);
+  result.set_artifact_verified(record.verification.verified);
+  result.set_verification_method(record.verification.method);
+  result.set_verified_signer(record.verification.signer);
+  result.set_verified_issuer(record.verification.issuer);
+  result.set_verified_at(record.verification.verified_at);
   return result;
 }
 

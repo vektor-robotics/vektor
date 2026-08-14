@@ -96,6 +96,8 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("OCI runtime cannot be empty");
   if (!is_valid_runtime_container_name(options.runtime_container))
     throw std::invalid_argument("invalid runtime container name");
+  if (options.trust_policy_path && options.trust_policy_path->empty())
+    throw std::invalid_argument("trust policy path cannot be empty");
   if (options.insecure) {
     if (!is_loopback_address(options.listen_address))
       throw std::invalid_argument(
@@ -315,8 +317,12 @@ int AgentRunner::run() {
   validate_agent_options(options_);
   auto runtime = std::make_shared<OciRuntimeDriver>(options_.oci_runtime,
                                                     options_.runtime_container);
-  AgentDeploymentState deployment_state(options_.deployment_state_path,
-                                        std::move(runtime));
+  std::shared_ptr<ArtifactVerifier> verifier;
+  if (options_.trust_policy_path)
+    verifier = std::make_shared<CosignArtifactVerifier>(
+        load_trust_policy(*options_.trust_policy_path));
+  AgentDeploymentState deployment_state(
+      options_.deployment_state_path, std::move(runtime), std::move(verifier));
   if (deployment_state.current().phase != DeploymentPhase::Idle ||
       deployment_state.current().operation != ReconciliationOperation::None) {
     const auto restored = deployment_state.refresh_observed();

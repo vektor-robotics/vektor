@@ -63,6 +63,7 @@ enum ReconciliationOperation {
   RECONCILIATION_OPERATION_PREPARING = 2;
   RECONCILIATION_OPERATION_ACTIVATING = 3;
   RECONCILIATION_OPERATION_ROLLING_BACK = 4;
+  RECONCILIATION_OPERATION_VERIFYING = 5;
 }
 
 message EnvironmentVariable {
@@ -112,6 +113,11 @@ message DeploymentRecord {
   ReconciliationOperation reconciliation_operation = 19;
   string operation_started_at = 20;
   uint64 operation_attempt = 21;
+  bool artifact_verified = 22;
+  string verification_method = 23;
+  string verified_signer = 24;
+  string verified_issuer = 25;
+  string verified_at = 26;
 }
 
 message PrepareDeploymentRequest {
