@@ -50,6 +50,38 @@ enum DeploymentPhase {
   DEPLOYMENT_PHASE_FAILED = 5;
 }
 
+enum RuntimeNetworkMode {
+  RUNTIME_NETWORK_MODE_UNSPECIFIED = 0;
+  RUNTIME_NETWORK_MODE_HOST = 1;
+  RUNTIME_NETWORK_MODE_BRIDGE = 2;
+  RUNTIME_NETWORK_MODE_NONE = 3;
+}
+
+message EnvironmentVariable {
+  string name = 1;
+  string value = 2;
+}
+
+message BindMount {
+  string source = 1;
+  string target = 2;
+  bool read_only = 3;
+}
+
+message DeviceMapping {
+  string host_path = 1;
+  string container_path = 2;
+}
+
+message RuntimeWorkloadSpec {
+  RuntimeNetworkMode network = 1;
+  string restart_policy = 2;
+  repeated EnvironmentVariable environment = 3;
+  repeated BindMount mounts = 4;
+  repeated DeviceMapping devices = 5;
+  repeated string command = 6;
+}
+
 message DeploymentRecord {
   uint32 schema_version = 1;
   string deployment_id = 2;
@@ -63,11 +95,16 @@ message DeploymentRecord {
   bool runtime_running = 10;
   bool drift_detected = 11;
   bool runtime_managed = 12;
+  RuntimeWorkloadSpec workload = 13;
+  RuntimeWorkloadSpec previous_workload = 14;
+  string workload_fingerprint = 15;
+  string observed_workload_fingerprint = 16;
 }
 
 message PrepareDeploymentRequest {
   string deployment_id = 1;
   string artifact = 2;
+  RuntimeWorkloadSpec workload = 3;
 }
 
 message ActivateDeploymentRequest { string deployment_id = 1; }

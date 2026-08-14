@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vektor/fleet.hpp"
+#include "vektor/runtime.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -20,6 +21,7 @@ struct DeploymentWave {
 struct RolloutConfig {
   std::string deployment_id;
   std::string artifact;
+  WorkloadSpec workload;
   std::filesystem::path fleet_config_path;
   std::filesystem::path state_path;
   std::chrono::milliseconds operation_timeout{300000};

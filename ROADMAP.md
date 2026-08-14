@@ -60,7 +60,7 @@ gap in the current deployment path.
 - [x] Ship the initial Docker/Podman single-container backend
 - [x] Persist desired, observed, and previously active artifact state separately
 - [x] Add idempotent start, stop, inspect, and rollback reconciliation operations
-- [ ] Add a strict workload spec for arguments, environment, mounts, and devices
+- [x] Add a strict workload spec for arguments, environment, mounts, and devices
 - [ ] Require runtime readiness and ROS health before rollout activation completes
 - [x] Detect drift between desired and observed runtime state
 - [x] Recheck observed state after agent restart without unintended promotion
