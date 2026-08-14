@@ -35,7 +35,7 @@ push_artifact() {
   curl --fail --silent --show-error -X POST -D "${headers_path}" \
     "http://${registry}/v2/${repository}/blobs/uploads/" >/dev/null
   local upload_url
-  upload_url="$(awk 'BEGIN { IGNORECASE=1 } /^location:/ {
+  upload_url="$(awk 'tolower($1) == "location:" {
     sub(/\r$/, "", $2); print $2
   }' "${headers_path}")"
   if [[ -z "${upload_url}" ]]; then
