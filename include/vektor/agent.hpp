@@ -30,6 +30,7 @@ struct AgentOptions {
   std::filesystem::path deployment_state_path{".vektor/deployment.yaml"};
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
+  std::optional<std::filesystem::path> trust_policy_path;
 };
 
 void validate_agent_options(const AgentOptions &options);

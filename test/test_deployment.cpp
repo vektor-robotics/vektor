@@ -63,6 +63,29 @@ public:
   vektor::RuntimeObservation observation;
   vektor::WorkloadSpec last_workload;
 };
+
+class FakeVerifier final : public vektor::ArtifactVerifier {
+public:
+  vektor::ArtifactVerification
+  verify(const std::string &artifact,
+         std::chrono::milliseconds timeout) override {
+    ++calls;
+    last_artifact = artifact;
+    last_timeout = timeout;
+    if (on_verify)
+      on_verify();
+    if (fail)
+      throw std::runtime_error("signature is not trusted");
+    return {true, "test_keyless", "release@example.com",
+            "https://issuer.example.com", "2026-08-14T12:00:00Z"};
+  }
+
+  int calls{0};
+  bool fail{false};
+  std::string last_artifact;
+  std::chrono::milliseconds last_timeout{0};
+  std::function<void()> on_verify;
+};
 } // namespace
 
 TEST(Deployment, RequiresDigestPinnedOciArtifact) {
@@ -110,6 +133,88 @@ TEST(Deployment, RecordsBackendFailure) {
   EXPECT_EQ(state.current().phase, vektor::DeploymentPhase::Failed);
   EXPECT_NE(state.current().message.find("simulated pull failure"),
             std::string::npos);
+  std::filesystem::remove(path);
+}
+
+TEST(Deployment, VerifiesBeforeRuntimePreparationAndPersistsProvenance) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_verified.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  auto verifier = std::make_shared<FakeVerifier>();
+  {
+    vektor::AgentDeploymentState state(path, runtime, verifier);
+    const auto staged = state.prepare("release-1", kArtifact);
+    EXPECT_EQ(verifier->calls, 1);
+    EXPECT_EQ(runtime->calls, 1);
+    EXPECT_TRUE(staged.verification.verified);
+    EXPECT_EQ(staged.verification.signer, "release@example.com");
+    const auto response = vektor::to_proto(staged);
+    EXPECT_EQ(response.schema_version(), 5U);
+    EXPECT_TRUE(response.artifact_verified());
+    EXPECT_EQ(response.verification_method(), "test_keyless");
+    EXPECT_EQ(response.verified_issuer(), "https://issuer.example.com");
+  }
+  {
+    vektor::AgentDeploymentState restored(path, runtime, verifier);
+    EXPECT_TRUE(restored.current().verification.verified);
+    EXPECT_EQ(restored.current().verification.signer, "release@example.com");
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(Deployment, RejectsUntrustedArtifactBeforeRuntimePull) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_untrusted.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  auto verifier = std::make_shared<FakeVerifier>();
+  verifier->fail = true;
+  vektor::AgentDeploymentState state(path, runtime, verifier);
+
+  EXPECT_THROW(state.prepare("release-1", kArtifact), std::runtime_error);
+  EXPECT_EQ(verifier->calls, 1);
+  EXPECT_EQ(runtime->calls, 0);
+  EXPECT_EQ(state.current().phase, vektor::DeploymentPhase::Failed);
+  EXPECT_FALSE(state.current().verification.verified);
+  EXPECT_NE(state.current().message.find("artifact verification failed"),
+            std::string::npos);
+  EXPECT_EQ(state.current().operation, vektor::ReconciliationOperation::None);
+  std::filesystem::remove(path);
+}
+
+TEST(Deployment, ExposesPersistedVerificationProgress) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_verifying.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  auto verifier = std::make_shared<FakeVerifier>();
+  std::promise<void> entered;
+  auto entered_future = entered.get_future();
+  std::promise<void> release;
+  auto release_future = release.get_future().share();
+  verifier->on_verify = [&] {
+    entered.set_value();
+    release_future.wait();
+  };
+  vektor::AgentDeploymentState state(path, runtime, verifier);
+
+  auto pending = std::async(std::launch::async, [&] {
+    return state.prepare("release-1", kArtifact);
+  });
+  entered_future.wait();
+  const auto progress = state.refresh_observed();
+  EXPECT_EQ(progress.operation, vektor::ReconciliationOperation::Verifying);
+  EXPECT_EQ(progress.phase, vektor::DeploymentPhase::Idle);
+  const auto response = vektor::to_proto(progress);
+  EXPECT_EQ(response.reconciliation_operation(),
+            vektor::agent::v1::RECONCILIATION_OPERATION_VERIFYING);
+  EXPECT_FALSE(response.artifact_verified());
+
+  release.set_value();
+  const auto staged = pending.get();
+  EXPECT_EQ(staged.phase, vektor::DeploymentPhase::Staged);
+  EXPECT_TRUE(staged.verification.verified);
   std::filesystem::remove(path);
 }
 

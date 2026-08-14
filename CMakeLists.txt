@@ -75,7 +75,7 @@ ament_target_dependencies(vektor_core
   lifecycle_msgs
 )
 
-add_library(vektor_deployment src/deployment.cpp src/runtime.cpp)
+add_library(vektor_deployment src/deployment.cpp src/runtime.cpp src/trust.cpp)
 target_include_directories(vektor_deployment PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -175,6 +175,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_deployment test/test_deployment.cpp)
   target_link_libraries(test_deployment vektor_deployment vektor_proto)
+
+  ament_add_gtest(test_trust test/test_trust.cpp)
+  target_link_libraries(test_trust vektor_deployment)
 
   ament_add_gtest(test_rollout test/test_rollout.cpp)
   target_link_libraries(test_rollout vektor_rollout vektor_agent

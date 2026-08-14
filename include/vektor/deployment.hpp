@@ -2,6 +2,7 @@
 
 #include "vektor/agent/v1/agent.grpc.pb.h"
 #include "vektor/runtime.hpp"
+#include "vektor/trust.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -14,7 +15,13 @@
 namespace vektor {
 
 enum class DeploymentPhase { Idle, Staged, Active, RolledBack, Failed };
-enum class ReconciliationOperation { None, Preparing, Activating, RollingBack };
+enum class ReconciliationOperation {
+  None,
+  Verifying,
+  Preparing,
+  Activating,
+  RollingBack
+};
 
 struct DeploymentRecord {
   std::string deployment_id;
@@ -29,6 +36,8 @@ struct DeploymentRecord {
   bool runtime_ready{false};
   bool runtime_managed{false};
   std::string runtime_readiness_status;
+  ArtifactVerification verification;
+  ArtifactVerification previous_verification;
   bool drift_detected{false};
   DeploymentPhase phase{DeploymentPhase::Idle};
   ReconciliationOperation operation{ReconciliationOperation::None};
@@ -46,7 +55,8 @@ bool is_pinned_oci_artifact(const std::string &artifact);
 class AgentDeploymentState {
 public:
   AgentDeploymentState(std::filesystem::path state_path,
-                       std::shared_ptr<RuntimeDriver> runtime);
+                       std::shared_ptr<RuntimeDriver> runtime,
+                       std::shared_ptr<ArtifactVerifier> verifier = nullptr);
 
   DeploymentRecord prepare(
       const std::string &deployment_id, const std::string &artifact,
@@ -77,6 +87,7 @@ private:
   void record_failure_locked(const std::string &message);
 
   std::shared_ptr<RuntimeDriver> runtime_;
+  std::shared_ptr<ArtifactVerifier> verifier_;
   mutable std::mutex mutex_;
   bool operation_in_progress_{false};
   DeploymentRecord record_;

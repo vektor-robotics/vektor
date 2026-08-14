@@ -53,7 +53,8 @@ restricted to loopback or Unix sockets:
 ros2 run vektor vektor agent --config config/talker.yaml \
   --listen 127.0.0.1:50051 --interval-ms 5000 --insecure \
   --oci-runtime docker --runtime-container vektor-workload \
-  --deployment-state .vektor/robot-001-deployment.yaml
+  --deployment-state .vektor/robot-001-deployment.yaml \
+  --trust-policy config/trust.example.yaml
 ```
 
 Any non-loopback deployment requires mutual TLS. The server certificate and key
@@ -155,7 +156,8 @@ progress and each agent's desired deployment are persisted atomically, so a
 process restart does not silently advance a release. OCI references must use
 `name@sha256:<64-hex-digest>`; mutable tags such as `latest` are rejected.
 `operation_timeout_ms` bounds OCI runtime work and non-activation deployment
-RPCs.
+RPCs. When artifact trust is enabled, verification and the runtime pull share
+this same deadline.
 `readiness_timeout_ms` bounds both container-readiness polling and the wait for
 a newly published ROS health snapshot. The activation RPC deadline covers both
 windows, so a stale pre-deployment health result cannot approve a release.
@@ -173,13 +175,14 @@ state are operational configuration, not a secrets store.
 VEKTOR labels containers it creates and refuses to replace or stop a same-named
 container without that ownership label.
 Desired and observed artifacts, the runtime container ID, ownership, running
-and readiness state, reconciliation operation, attempt number, and drift status
-are persisted atomically and returned by `GetDeployment`. For containers with
-an OCI health check, readiness requires the runtime to report `healthy`; without
-one, a running container is considered runtime-ready. The agent rechecks
-observed state after restart, during health inspection, and when deployment
-state is requested. Existing deployment state schemas 1 through 3 remain
-readable and are upgraded when the state is next persisted.
+and readiness state, reconciliation operation, attempt number, artifact
+verification provenance, and drift status are persisted atomically and returned
+by `GetDeployment`. For containers with an OCI health check, readiness requires
+the runtime to report `healthy`; without one, a running container is considered
+runtime-ready. The agent rechecks observed state after restart, during health
+inspection, and when deployment state is requested. Existing deployment state
+schemas 1 through 4 remain readable and are upgraded when the state is next
+persisted.
 
 Prepare, activation, and rollback persist their operation intent before
 changing the runtime. After an interrupted agent process restarts, VEKTOR
@@ -188,11 +191,36 @@ observed interrupted activation returns to `staged` and must be retried so a
 fresh ROS health gate still runs. It never silently promotes an interrupted
 activation.
 
-The current v0.6 implementation supports one managed container per agent. Its
-workload specification is persisted alongside the artifact, and rollback
-restores the previous artifact and its exact previous workload settings.
-End-to-end fault-injection coverage for the complete two-robot definition of
-done remains before v0.6 is complete.
+The current runtime implementation supports one managed container per agent.
+Its workload specification is persisted alongside the artifact, and rollback
+restores the previous artifact, workload settings, and verification provenance.
+
+### Artifact trust
+
+Install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/)
+on each agent host, then pass `--trust-policy <path>` to enforce verification
+before the OCI runtime can pull an artifact. Policies are strict versioned YAML;
+unknown fields and mixed key/keyless settings are rejected.
+
+The example policy uses keyless verification with an exact certificate identity
+and OIDC issuer:
+
+```yaml
+schema_version: 1
+mode: keyless
+certificate_identity: https://github.com/vektor-robotics/vektor/.github/workflows/release.yaml@refs/heads/main
+certificate_oidc_issuer: https://token.actions.githubusercontent.com
+cosign_executable: cosign
+timeout_ms: 30000
+```
+
+For a public key, use `mode: public_key` and `key: cosign.pub`. Relative key
+paths resolve from the policy file; Cosign-supported KMS URIs can be used
+directly. VEKTOR invokes `cosign verify` with the configured key or exact keyless
+identity constraints. A timeout, missing signature, identity mismatch, issuer
+mismatch, or invalid signature fails preparation before the container runtime
+is called. Successful status records expose the verification method, signer,
+issuer, and timestamp through deployment API schema v5.
 
 ## Repository layout
 
