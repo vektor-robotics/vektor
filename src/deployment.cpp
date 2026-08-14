@@ -49,6 +49,19 @@ DeploymentPhase parse_phase(const std::string &value) {
                            "'");
 }
 
+ReconciliationOperation parse_operation(const std::string &value) {
+  if (value == "none")
+    return ReconciliationOperation::None;
+  if (value == "preparing")
+    return ReconciliationOperation::Preparing;
+  if (value == "activating")
+    return ReconciliationOperation::Activating;
+  if (value == "rolling_back")
+    return ReconciliationOperation::RollingBack;
+  throw std::runtime_error("unknown persisted reconciliation operation '" +
+                           value + "'");
+}
+
 vektor::agent::v1::DeploymentPhase proto_phase(DeploymentPhase phase) {
   switch (phase) {
   case DeploymentPhase::Idle:
@@ -63,6 +76,42 @@ vektor::agent::v1::DeploymentPhase proto_phase(DeploymentPhase phase) {
     return vektor::agent::v1::DEPLOYMENT_PHASE_FAILED;
   }
   return vektor::agent::v1::DEPLOYMENT_PHASE_UNSPECIFIED;
+}
+
+vektor::agent::v1::ReconciliationOperation
+proto_operation(ReconciliationOperation operation) {
+  switch (operation) {
+  case ReconciliationOperation::None:
+    return vektor::agent::v1::RECONCILIATION_OPERATION_NONE;
+  case ReconciliationOperation::Preparing:
+    return vektor::agent::v1::RECONCILIATION_OPERATION_PREPARING;
+  case ReconciliationOperation::Activating:
+    return vektor::agent::v1::RECONCILIATION_OPERATION_ACTIVATING;
+  case ReconciliationOperation::RollingBack:
+    return vektor::agent::v1::RECONCILIATION_OPERATION_ROLLING_BACK;
+  }
+  return vektor::agent::v1::RECONCILIATION_OPERATION_UNSPECIFIED;
+}
+
+void apply_observation(DeploymentRecord &record,
+                       const RuntimeObservation &observed) {
+  record.observed_artifact = observed.artifact;
+  record.observed_workload_fingerprint = observed.workload_fingerprint;
+  record.runtime_id = observed.runtime_id;
+  record.runtime_running = observed.running;
+  record.runtime_ready = observed.ready;
+  record.runtime_managed = observed.managed;
+  record.runtime_readiness_status = observed.readiness_status;
+}
+
+bool matches_desired(const DeploymentRecord &record,
+                     const RuntimeObservation &observed) {
+  return record.artifact.empty()
+             ? !observed.running
+             : observed.running && observed.ready && observed.managed &&
+                   observed.artifact == record.artifact &&
+                   observed.workload_fingerprint ==
+                       workload_fingerprint(record.workload);
 }
 
 WorkloadSpec load_workload(const YAML::Node &node) {
@@ -144,6 +193,20 @@ const char *deployment_phase_name(DeploymentPhase phase) {
   return "unknown";
 }
 
+const char *reconciliation_operation_name(ReconciliationOperation operation) {
+  switch (operation) {
+  case ReconciliationOperation::None:
+    return "none";
+  case ReconciliationOperation::Preparing:
+    return "preparing";
+  case ReconciliationOperation::Activating:
+    return "activating";
+  case ReconciliationOperation::RollingBack:
+    return "rolling_back";
+  }
+  return "unknown";
+}
+
 bool is_valid_deployment_id(const std::string &value) {
   return valid_deployment_id(value);
 }
@@ -175,7 +238,7 @@ void AgentDeploymentState::load() {
     if (!root.IsMap())
       throw std::runtime_error("deployment state must be a mapping");
     const auto schema_version = root["schema_version"].as<unsigned int>();
-    if (schema_version < 1 || schema_version > 3)
+    if (schema_version < 1 || schema_version > 4)
       throw std::runtime_error("unsupported deployment state schema");
     record_.deployment_id = root["deployment_id"].as<std::string>();
     record_.artifact = root["artifact"].as<std::string>();
@@ -193,6 +256,17 @@ void AgentDeploymentState::load() {
       record_.runtime_managed = root["runtime_managed"].as<bool>(false);
       record_.drift_detected = root["drift_detected"].as<bool>();
     }
+    if (schema_version >= 4) {
+      record_.runtime_ready = root["runtime_ready"].as<bool>(false);
+      record_.runtime_readiness_status =
+          root["runtime_readiness_status"].as<std::string>("");
+      record_.operation = parse_operation(
+          root["reconciliation_operation"].as<std::string>("none"));
+      record_.operation_started_at =
+          root["operation_started_at"].as<std::string>("");
+      record_.operation_attempt =
+          root["operation_attempt"].as<std::uint64_t>(0);
+    }
     record_.phase = parse_phase(root["phase"].as<std::string>());
     record_.message = root["message"].as<std::string>();
     record_.updated_at = root["updated_at"].as<std::string>();
@@ -207,7 +281,7 @@ void AgentDeploymentState::persist_locked() const {
   if (!parent.empty())
     std::filesystem::create_directories(parent);
   YAML::Emitter output;
-  output << YAML::BeginMap << YAML::Key << "schema_version" << YAML::Value << 3
+  output << YAML::BeginMap << YAML::Key << "schema_version" << YAML::Value << 4
          << YAML::Key << "deployment_id" << YAML::Value << record_.deployment_id
          << YAML::Key << "artifact" << YAML::Value << record_.artifact
          << YAML::Key << "previous_artifact" << YAML::Value
@@ -220,10 +294,18 @@ void AgentDeploymentState::persist_locked() const {
          << record_.observed_workload_fingerprint << YAML::Key << "runtime_id"
          << YAML::Value << record_.runtime_id << YAML::Key << "runtime_running"
          << YAML::Value << record_.runtime_running << YAML::Key
-         << "runtime_managed" << YAML::Value << record_.runtime_managed
-         << YAML::Key << "drift_detected" << YAML::Value
-         << record_.drift_detected << YAML::Key << "phase" << YAML::Value
-         << deployment_phase_name(record_.phase) << YAML::Key << "message"
+         << "runtime_ready" << YAML::Value << record_.runtime_ready << YAML::Key
+         << "runtime_readiness_status" << YAML::Value
+         << record_.runtime_readiness_status << YAML::Key << "runtime_managed"
+         << YAML::Value << record_.runtime_managed << YAML::Key
+         << "drift_detected" << YAML::Value << record_.drift_detected
+         << YAML::Key << "phase" << YAML::Value
+         << deployment_phase_name(record_.phase) << YAML::Key
+         << "reconciliation_operation" << YAML::Value
+         << reconciliation_operation_name(record_.operation) << YAML::Key
+         << "operation_started_at" << YAML::Value
+         << record_.operation_started_at << YAML::Key << "operation_attempt"
+         << YAML::Value << record_.operation_attempt << YAML::Key << "message"
          << YAML::Value << record_.message << YAML::Key << "updated_at"
          << YAML::Value << record_.updated_at << YAML::EndMap;
   const auto temporary = state_path_.string() + ".tmp";
@@ -245,16 +327,16 @@ void AgentDeploymentState::persist_locked() const {
                              state_path_.string() + "': " + error.message());
 }
 
-DeploymentRecord AgentDeploymentState::prepare(const std::string &deployment_id,
-                                               const std::string &artifact,
-                                               WorkloadSpec workload) {
+DeploymentRecord AgentDeploymentState::prepare(
+    const std::string &deployment_id, const std::string &artifact,
+    WorkloadSpec workload, std::chrono::milliseconds operation_timeout) {
   if (!is_valid_deployment_id(deployment_id))
     throw std::invalid_argument("invalid deployment ID");
   if (!is_pinned_oci_artifact(artifact))
     throw std::invalid_argument(
         "artifact must be an OCI reference pinned by sha256 digest");
   validate_workload_spec(workload);
-  std::lock_guard lock(mutex_);
+  std::unique_lock lock(mutex_);
   if (record_.deployment_id == deployment_id && record_.artifact == artifact &&
       record_.workload == workload &&
       (record_.phase == DeploymentPhase::Staged ||
@@ -262,6 +344,9 @@ DeploymentRecord AgentDeploymentState::prepare(const std::string &deployment_id,
     return record_;
   if (record_.phase == DeploymentPhase::Staged)
     throw std::runtime_error("another deployment is already staged");
+  if (record_.operation != ReconciliationOperation::None ||
+      operation_in_progress_)
+    throw std::runtime_error("another reconciliation operation is in progress");
   const bool current_is_rollback_target =
       record_.phase == DeploymentPhase::Active ||
       record_.phase == DeploymentPhase::RolledBack;
@@ -269,58 +354,67 @@ DeploymentRecord AgentDeploymentState::prepare(const std::string &deployment_id,
       current_is_rollback_target ? record_.artifact : record_.previous_artifact;
   const auto previous_workload =
       current_is_rollback_target ? record_.workload : record_.previous_workload;
-  try {
-    runtime_->prepare(artifact);
-  } catch (const std::exception &error) {
-    record_.deployment_id = deployment_id;
-    record_.artifact = artifact;
-    record_.previous_artifact = previous;
-    record_.workload = workload;
-    record_.previous_workload = previous_workload;
-    record_failure_locked(error.what());
-    persist_locked();
-    throw;
-  }
   record_.deployment_id = deployment_id;
   record_.artifact = artifact;
   record_.previous_artifact = previous;
   record_.workload = std::move(workload);
   record_.previous_workload = previous_workload;
+  record_.message = "preparing artifact";
+  begin_operation_locked(ReconciliationOperation::Preparing);
+  persist_locked();
+  try {
+    lock.unlock();
+    runtime_->prepare(artifact, operation_timeout);
+    lock.lock();
+  } catch (const std::exception &error) {
+    if (!lock.owns_lock())
+      lock.lock();
+    record_failure_locked(error.what());
+    persist_locked();
+    throw;
+  }
   record_.phase = DeploymentPhase::Staged;
   record_.message = "artifact prepared; awaiting activation";
   record_.updated_at = utc_timestamp();
   record_.drift_detected = false;
+  complete_operation_locked();
   persist_locked();
   return record_;
 }
 
 DeploymentRecord
-AgentDeploymentState::activate(const std::string &deployment_id) {
-  std::lock_guard lock(mutex_);
+AgentDeploymentState::activate(const std::string &deployment_id,
+                               std::chrono::milliseconds operation_timeout,
+                               std::chrono::milliseconds readiness_timeout) {
+  std::unique_lock lock(mutex_);
   if (record_.deployment_id != deployment_id ||
       (record_.phase != DeploymentPhase::Staged &&
        record_.phase != DeploymentPhase::Active))
     throw std::runtime_error("deployment is not staged");
+  begin_operation_locked(ReconciliationOperation::Activating);
+  record_.message = "activating desired workload";
+  persist_locked();
+  const auto artifact = record_.artifact;
+  const auto workload = record_.workload;
   try {
-    const auto observed =
-        runtime_->activate(record_.artifact, record_.workload);
-    record_.observed_artifact = observed.artifact;
-    record_.observed_workload_fingerprint = observed.workload_fingerprint;
-    record_.runtime_id = observed.runtime_id;
-    record_.runtime_running = observed.running;
-    record_.runtime_managed = observed.managed;
-    if (!observed.running || !observed.managed ||
-        observed.artifact != record_.artifact ||
-        observed.workload_fingerprint != workload_fingerprint(record_.workload))
+    lock.unlock();
+    const auto observed = runtime_->activate(
+        artifact, workload, operation_timeout, readiness_timeout);
+    lock.lock();
+    apply_observation(record_, observed);
+    if (!matches_desired(record_, observed))
       throw std::runtime_error(
-          "observed runtime does not match desired artifact");
+          "observed runtime is not ready or does not match desired artifact");
     record_.drift_detected = false;
     record_.phase = DeploymentPhase::Active;
     record_.message = "desired artifact is running and observed";
     record_.updated_at = utc_timestamp();
+    complete_operation_locked();
     persist_locked();
     return record_;
   } catch (const std::exception &error) {
+    if (!lock.owns_lock())
+      lock.lock();
     record_failure_locked(std::string("activation failed: ") + error.what());
     persist_locked();
     throw;
@@ -328,34 +422,35 @@ AgentDeploymentState::activate(const std::string &deployment_id) {
 }
 
 DeploymentRecord
-AgentDeploymentState::rollback(const std::string &deployment_id) {
-  std::lock_guard lock(mutex_);
+AgentDeploymentState::rollback(const std::string &deployment_id,
+                               std::chrono::milliseconds operation_timeout) {
+  std::unique_lock lock(mutex_);
   if (record_.deployment_id != deployment_id ||
       (record_.phase != DeploymentPhase::Staged &&
        record_.phase != DeploymentPhase::Active &&
        record_.phase != DeploymentPhase::Failed &&
        record_.phase != DeploymentPhase::RolledBack))
     throw std::runtime_error("deployment cannot be rolled back");
+  if (record_.operation != ReconciliationOperation::None ||
+      operation_in_progress_)
+    throw std::runtime_error("another reconciliation operation is in progress");
   const auto target = record_.previous_artifact;
   const auto target_workload = record_.previous_workload;
   record_.artifact = target;
   record_.workload = target_workload;
+  begin_operation_locked(ReconciliationOperation::RollingBack);
+  record_.message = "reconciling rollback target";
+  persist_locked();
   try {
-    const auto observed = target.empty()
-                              ? runtime_->stop()
-                              : runtime_->activate(target, target_workload);
-    record_.observed_artifact = observed.artifact;
-    record_.observed_workload_fingerprint = observed.workload_fingerprint;
-    record_.runtime_id = observed.runtime_id;
-    record_.runtime_running = observed.running;
-    record_.runtime_managed = observed.managed;
-    const bool matches = target.empty()
-                             ? !observed.running
-                             : observed.running && observed.managed &&
-                                   observed.artifact == target &&
-                                   observed.workload_fingerprint ==
-                                       workload_fingerprint(target_workload);
-    if (!matches)
+    lock.unlock();
+    const auto observed =
+        target.empty()
+            ? runtime_->stop(operation_timeout)
+            : runtime_->activate(target, target_workload, operation_timeout,
+                                 operation_timeout);
+    lock.lock();
+    apply_observation(record_, observed);
+    if (!matches_desired(record_, observed))
       throw std::runtime_error(
           "observed runtime does not match rollback target");
     record_.drift_detected = false;
@@ -364,9 +459,12 @@ AgentDeploymentState::rollback(const std::string &deployment_id) {
                           ? "managed workload stopped"
                           : "previous artifact restored and observed";
     record_.updated_at = utc_timestamp();
+    complete_operation_locked();
     persist_locked();
     return record_;
   } catch (const std::exception &error) {
+    if (!lock.owns_lock())
+      lock.lock();
     record_failure_locked(std::string("rollback failed: ") + error.what());
     persist_locked();
     throw;
@@ -377,23 +475,41 @@ void AgentDeploymentState::record_failure_locked(const std::string &message) {
   record_.phase = DeploymentPhase::Failed;
   record_.message = message;
   record_.updated_at = utc_timestamp();
+  complete_operation_locked();
 }
 
-bool AgentDeploymentState::observe_locked() {
+void AgentDeploymentState::begin_operation_locked(
+    ReconciliationOperation operation) {
+  if (record_.operation != ReconciliationOperation::None ||
+      operation_in_progress_)
+    throw std::runtime_error("another reconciliation operation is in progress");
+  record_.operation = operation;
+  operation_in_progress_ = true;
+  record_.operation_started_at = utc_timestamp();
+  ++record_.operation_attempt;
+  record_.updated_at = record_.operation_started_at;
+}
+
+void AgentDeploymentState::complete_operation_locked() {
+  record_.operation = ReconciliationOperation::None;
+  operation_in_progress_ = false;
+  record_.operation_started_at.clear();
+}
+
+bool AgentDeploymentState::observe_locked(
+    std::chrono::milliseconds operation_timeout) {
   const auto previous_artifact = record_.observed_artifact;
   const auto previous_workload_fingerprint =
       record_.observed_workload_fingerprint;
   const auto previous_runtime_id = record_.runtime_id;
   const auto previous_running = record_.runtime_running;
+  const auto previous_ready = record_.runtime_ready;
   const auto previous_managed = record_.runtime_managed;
+  const auto previous_readiness_status = record_.runtime_readiness_status;
   const auto previous_drift = record_.drift_detected;
   const auto previous_phase = record_.phase;
-  const auto observed = runtime_->inspect();
-  record_.observed_artifact = observed.artifact;
-  record_.observed_workload_fingerprint = observed.workload_fingerprint;
-  record_.runtime_id = observed.runtime_id;
-  record_.runtime_running = observed.running;
-  record_.runtime_managed = observed.managed;
+  const auto observed = runtime_->inspect(operation_timeout);
+  apply_observation(record_, observed);
   if (record_.phase != DeploymentPhase::Active &&
       record_.phase != DeploymentPhase::RolledBack)
     return previous_artifact != record_.observed_artifact ||
@@ -401,13 +517,10 @@ bool AgentDeploymentState::observe_locked() {
                record_.observed_workload_fingerprint ||
            previous_runtime_id != record_.runtime_id ||
            previous_running != record_.runtime_running ||
-           previous_managed != record_.runtime_managed;
-  const bool matches = record_.artifact.empty()
-                           ? !observed.running
-                           : observed.running && observed.managed &&
-                                 observed.artifact == record_.artifact &&
-                                 observed.workload_fingerprint ==
-                                     workload_fingerprint(record_.workload);
+           previous_ready != record_.runtime_ready ||
+           previous_managed != record_.runtime_managed ||
+           previous_readiness_status != record_.runtime_readiness_status;
+  const bool matches = matches_desired(record_, observed);
   record_.drift_detected = !matches;
   if (!matches)
     record_failure_locked("runtime drift detected: observed workload does not "
@@ -417,22 +530,71 @@ bool AgentDeploymentState::observe_locked() {
              record_.observed_workload_fingerprint ||
          previous_runtime_id != record_.runtime_id ||
          previous_running != record_.runtime_running ||
+         previous_ready != record_.runtime_ready ||
          previous_managed != record_.runtime_managed ||
+         previous_readiness_status != record_.runtime_readiness_status ||
          previous_drift != record_.drift_detected ||
          previous_phase != record_.phase;
 }
 
-DeploymentRecord AgentDeploymentState::refresh_observed() {
+void AgentDeploymentState::recover_interrupted_locked(
+    std::chrono::milliseconds operation_timeout) {
+  const auto interrupted = record_.operation;
+  const auto observed = runtime_->inspect(operation_timeout);
+  apply_observation(record_, observed);
+  if (interrupted == ReconciliationOperation::RollingBack &&
+      matches_desired(record_, observed)) {
+    record_.phase = DeploymentPhase::RolledBack;
+    record_.drift_detected = false;
+    record_.message = "interrupted rollback completed before agent restart";
+  } else if (interrupted == ReconciliationOperation::Activating &&
+             matches_desired(record_, observed)) {
+    record_.phase = DeploymentPhase::Staged;
+    record_.drift_detected = false;
+    record_.message =
+        "interrupted activation observed; retry activation for ROS readiness";
+  } else {
+    record_.drift_detected = interrupted != ReconciliationOperation::Preparing;
+    record_.phase = DeploymentPhase::Failed;
+    record_.message = std::string("interrupted ") +
+                      reconciliation_operation_name(interrupted) +
+                      " requires operator retry or rollback";
+  }
+  record_.updated_at = utc_timestamp();
+  complete_operation_locked();
+}
+
+DeploymentRecord AgentDeploymentState::refresh_observed(
+    std::chrono::milliseconds operation_timeout) {
   std::lock_guard lock(mutex_);
   try {
-    if (observe_locked())
+    if (record_.operation != ReconciliationOperation::None) {
+      if (operation_in_progress_)
+        return record_;
+      recover_interrupted_locked(operation_timeout);
       persist_locked();
+    } else if (observe_locked(operation_timeout)) {
+      persist_locked();
+    }
   } catch (const std::exception &error) {
     record_.drift_detected = true;
     record_failure_locked(std::string("runtime inspection failed: ") +
                           error.what());
     persist_locked();
   }
+  return record_;
+}
+
+DeploymentRecord
+AgentDeploymentState::fail_activation(const std::string &deployment_id,
+                                      const std::string &message) {
+  std::lock_guard lock(mutex_);
+  if (record_.deployment_id != deployment_id ||
+      record_.phase != DeploymentPhase::Active ||
+      record_.operation != ReconciliationOperation::None)
+    throw std::runtime_error("deployment is not active");
+  record_failure_locked("activation readiness failed: " + message);
+  persist_locked();
   return record_;
 }
 
@@ -443,7 +605,7 @@ DeploymentRecord AgentDeploymentState::current() const {
 
 vektor::agent::v1::DeploymentRecord to_proto(const DeploymentRecord &record) {
   vektor::agent::v1::DeploymentRecord result;
-  result.set_schema_version(3);
+  result.set_schema_version(4);
   result.set_deployment_id(record.deployment_id);
   result.set_artifact(record.artifact);
   result.set_previous_artifact(record.previous_artifact);
@@ -455,11 +617,16 @@ vektor::agent::v1::DeploymentRecord to_proto(const DeploymentRecord &record) {
       record.observed_workload_fingerprint);
   result.set_runtime_id(record.runtime_id);
   result.set_runtime_running(record.runtime_running);
+  result.set_runtime_ready(record.runtime_ready);
   result.set_runtime_managed(record.runtime_managed);
+  result.set_runtime_readiness_status(record.runtime_readiness_status);
   result.set_drift_detected(record.drift_detected);
   *result.mutable_workload() = to_proto(record.workload);
   *result.mutable_previous_workload() = to_proto(record.previous_workload);
   result.set_workload_fingerprint(workload_fingerprint(record.workload));
+  result.set_reconciliation_operation(proto_operation(record.operation));
+  result.set_operation_started_at(record.operation_started_at);
+  result.set_operation_attempt(record.operation_attempt);
   return result;
 }
 

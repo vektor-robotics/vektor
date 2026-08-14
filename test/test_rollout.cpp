@@ -24,8 +24,12 @@ public:
   activate(const std::string &artifact,
            const vektor::WorkloadSpec &workload) override {
     last_workload = workload;
-    observation = {true, artifact, "test-container", true,
-                   vektor::workload_fingerprint(workload)};
+    observation = {true,     true,
+                   artifact, "test-container",
+                   true,     vektor::workload_fingerprint(workload),
+                   "none"};
+    if (on_activate)
+      on_activate();
     return observation;
   }
   vektor::RuntimeObservation stop() override {
@@ -35,6 +39,7 @@ public:
   vektor::RuntimeObservation inspect() override { return observation; }
   int calls{0};
   std::function<void()> on_prepare;
+  std::function<void()> on_activate;
   vektor::RuntimeObservation observation;
   vektor::WorkloadSpec last_workload;
 };
@@ -58,6 +63,9 @@ struct TestDeployAgent {
                   const std::filesystem::path &state_path)
       : deployment(state_path, backend), service(health, deployment) {
     health.publish(healthy_snapshot(robot_id));
+    backend->on_activate = [this, robot_id] {
+      health.publish(healthy_snapshot(robot_id));
+    };
     grpc::ServerBuilder builder;
     builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(),
                              &port);
@@ -105,6 +113,7 @@ void write_configs(const RolloutFiles &files, int first_port, int second_port) {
           << kArtifact << "\nfleet_config: " << files.fleet.string()
           << "\nstate_file: " << files.state.string()
           << "\noperation_timeout_ms: 1000\nsettle_time_ms: 0\n"
+          << "readiness_timeout_ms: 1000\n"
           << "workload:\n  network: host\n  restart_policy: unless-stopped\n"
           << "  environment:\n    ROS_DOMAIN_ID: '42'\n"
           << "  mounts:\n    - source: /tmp\n      target: /data\n"
@@ -142,6 +151,7 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
 
   const auto config = vektor::load_rollout_config(files.rollout.string());
   EXPECT_EQ(config.operation_timeout.count(), 1000);
+  EXPECT_EQ(config.readiness_timeout.count(), 1000);
   EXPECT_EQ(config.workload.environment.at("ROS_DOMAIN_ID"), "42");
   ASSERT_EQ(config.workload.mounts.size(), 1U);
   EXPECT_TRUE(config.workload.mounts.front().read_only);
@@ -155,6 +165,9 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   EXPECT_NE(
       vektor::rollout_report_to_json(deployed).find("\"action\":\"deploy\""),
       std::string::npos);
+  EXPECT_NE(
+      vektor::rollout_report_to_json(deployed).find("\"schema_version\":2"),
+      std::string::npos);
 
   auto stub = vektor::agent::v1::Agent::NewStub(
       grpc::CreateChannel("127.0.0.1:" + std::to_string(first.port),
@@ -164,11 +177,15 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   vektor::agent::v1::DeploymentRecord response;
   ASSERT_TRUE(stub->GetDeployment(&context, request, &response).ok());
   EXPECT_EQ(response.phase(), vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE);
-  EXPECT_EQ(response.schema_version(), 3U);
+  EXPECT_EQ(response.schema_version(), 4U);
   EXPECT_EQ(response.observed_artifact(), kArtifact);
   EXPECT_EQ(response.observed_workload_fingerprint(),
             vektor::workload_fingerprint(config.workload));
   EXPECT_TRUE(response.runtime_running());
+  EXPECT_TRUE(response.runtime_ready());
+  EXPECT_EQ(response.reconciliation_operation(),
+            vektor::agent::v1::RECONCILIATION_OPERATION_NONE);
+  EXPECT_EQ(response.operation_attempt(), 2U);
   EXPECT_FALSE(response.drift_detected());
 
   const auto promoted = vektor::promote_release(config);
@@ -191,7 +208,7 @@ TEST(Rollout, AutomaticallyRollsBackFailedHealthGate) {
   TestDeployAgent first("robot-1", files.first_agent);
   TestDeployAgent second("robot-2", files.second_agent);
   write_configs(files, first.port, second.port);
-  first.backend->on_prepare = [&] {
+  first.backend->on_activate = [&] {
     auto snapshot = healthy_snapshot("robot-1");
     snapshot.state = vektor::HealthState::Unhealthy;
     first.health.publish(std::move(snapshot));
@@ -200,8 +217,33 @@ TEST(Rollout, AutomaticallyRollsBackFailedHealthGate) {
   const auto config = vektor::load_rollout_config(files.rollout.string());
   const auto deployed = vektor::deploy_release(config);
   EXPECT_FALSE(deployed.success);
-  EXPECT_NE(deployed.message.find("health gate failed"), std::string::npos);
+  EXPECT_NE(deployed.message.find("activation failed"), std::string::npos);
+  ASSERT_EQ(deployed.robots.size(), 1U);
+  EXPECT_NE(deployed.robots.front().message.find("fresh ROS health"),
+            std::string::npos);
+  EXPECT_EQ(deployed.robots.front().phase, "failed");
+  EXPECT_EQ(deployed.robots.front().operation, "none");
   EXPECT_EQ(first.deployment.current().phase,
             vektor::DeploymentPhase::RolledBack);
   EXPECT_FALSE(std::filesystem::exists(files.state));
+}
+
+TEST(Rollout, TimesOutWithoutFreshPostActivationHealth) {
+  RolloutFiles files;
+  TestDeployAgent first("robot-1", files.first_agent);
+  TestDeployAgent second("robot-2", files.second_agent);
+  write_configs(files, first.port, second.port);
+  first.backend->on_activate = nullptr;
+
+  auto config = vektor::load_rollout_config(files.rollout.string());
+  config.readiness_timeout = std::chrono::milliseconds(25);
+  const auto deployed = vektor::deploy_release(config);
+  EXPECT_FALSE(deployed.success);
+  EXPECT_NE(deployed.message.find("activation failed"), std::string::npos);
+  ASSERT_EQ(deployed.robots.size(), 1U);
+  EXPECT_NE(deployed.robots.front().message.find("before timeout"),
+            std::string::npos);
+  EXPECT_EQ(deployed.robots.front().phase, "failed");
+  EXPECT_EQ(first.deployment.current().phase,
+            vektor::DeploymentPhase::RolledBack);
 }

@@ -132,7 +132,8 @@ ros2 run vektor vektor deploy --config config/rollout.example.yaml
 VEKTOR checks the selected robots before deployment, asks each agent to pull the
 artifact with its configured Docker or Podman runtime, replaces the managed
 container with that exact digest, verifies the observed image reference, waits
-for the configured settling period, and checks ROS health again. A failed
+for runtime readiness and a fresh post-activation ROS health snapshot, waits
+for the configured settling period, and checks fleet health again. A failed
 prepare, activation, observation, or post-deploy health gate rolls the entire
 wave back automatically.
 
@@ -153,8 +154,11 @@ Add `--format json` to any rollout command for automation. Operator rollout
 progress and each agent's desired deployment are persisted atomically, so a
 process restart does not silently advance a release. OCI references must use
 `name@sha256:<64-hex-digest>`; mutable tags such as `latest` are rejected.
-`operation_timeout_ms` gives image pulls a separate deadline from the fleet's
-short health-request timeout.
+`operation_timeout_ms` bounds OCI runtime work and non-activation deployment
+RPCs.
+`readiness_timeout_ms` bounds both container-readiness polling and the wait for
+a newly published ROS health snapshot. The activation RPC deadline covers both
+windows, so a stale pre-deployment health result cannot approve a release.
 
 The initial runtime driver manages one container, named `vektor-workload` by
 default. Override the name with `--runtime-container`. A strict optional
@@ -169,15 +173,26 @@ state are operational configuration, not a secrets store.
 VEKTOR labels containers it creates and refuses to replace or stop a same-named
 container without that ownership label.
 Desired and observed artifacts, the runtime container ID, ownership, running
-state, and drift status are persisted atomically and returned by
-`GetDeployment`. The agent rechecks observed state after restart, during health
-inspection, and when deployment state is requested.
+and readiness state, reconciliation operation, attempt number, and drift status
+are persisted atomically and returned by `GetDeployment`. For containers with
+an OCI health check, readiness requires the runtime to report `healthy`; without
+one, a running container is considered runtime-ready. The agent rechecks
+observed state after restart, during health inspection, and when deployment
+state is requested. Existing deployment state schemas 1 through 3 remain
+readable and are upgraded when the state is next persisted.
+
+Prepare, activation, and rollback persist their operation intent before
+changing the runtime. After an interrupted agent process restarts, VEKTOR
+inspects the actual container. A completed rollback is finalized, while an
+observed interrupted activation returns to `staged` and must be retried so a
+fresh ROS health gate still runs. It never silently promotes an interrupted
+activation.
 
 The current v0.6 implementation supports one managed container per agent. Its
 workload specification is persisted alongside the artifact, and rollback
 restores the previous artifact and its exact previous workload settings.
-Runtime readiness and timeout/crash-recovery hardening remain before v0.6 is
-complete.
+End-to-end fault-injection coverage for the complete two-robot definition of
+done remains before v0.6 is complete.
 
 ## Repository layout
 

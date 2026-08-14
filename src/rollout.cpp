@@ -232,6 +232,39 @@ bool health_allowed(HealthState state, bool allow_degraded) {
          (allow_degraded && state == HealthState::Degraded);
 }
 
+const char *response_phase_name(vektor::agent::v1::DeploymentPhase phase) {
+  switch (phase) {
+  case vektor::agent::v1::DEPLOYMENT_PHASE_IDLE:
+    return "idle";
+  case vektor::agent::v1::DEPLOYMENT_PHASE_STAGED:
+    return "staged";
+  case vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE:
+    return "active";
+  case vektor::agent::v1::DEPLOYMENT_PHASE_ROLLED_BACK:
+    return "rolled_back";
+  case vektor::agent::v1::DEPLOYMENT_PHASE_FAILED:
+    return "failed";
+  default:
+    return "unknown";
+  }
+}
+
+const char *
+response_operation_name(vektor::agent::v1::ReconciliationOperation operation) {
+  switch (operation) {
+  case vektor::agent::v1::RECONCILIATION_OPERATION_NONE:
+    return "none";
+  case vektor::agent::v1::RECONCILIATION_OPERATION_PREPARING:
+    return "preparing";
+  case vektor::agent::v1::RECONCILIATION_OPERATION_ACTIVATING:
+    return "activating";
+  case vektor::agent::v1::RECONCILIATION_OPERATION_ROLLING_BACK:
+    return "rolling_back";
+  default:
+    return "unknown";
+  }
+}
+
 std::vector<FleetRobotConfig>
 robots_by_id(const FleetConfig &fleet, const std::vector<std::string> &ids) {
   std::vector<FleetRobotConfig> robots;
@@ -255,8 +288,11 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
   auto stub = vektor::agent::v1::Agent::NewStub(
       make_fleet_channel(robot, fleet.transport));
   grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       rollout.operation_timeout);
+  const auto rpc_timeout =
+      action == RpcAction::Activate
+          ? rollout.operation_timeout + rollout.readiness_timeout
+          : rollout.operation_timeout;
+  context.set_deadline(std::chrono::system_clock::now() + rpc_timeout);
   vektor::agent::v1::DeploymentRecord response;
   grpc::Status status;
   if (action == RpcAction::Prepare) {
@@ -264,24 +300,44 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     request.set_deployment_id(rollout.deployment_id);
     request.set_artifact(rollout.artifact);
     *request.mutable_workload() = to_proto(rollout.workload);
+    request.set_operation_timeout_ms(rollout.operation_timeout.count());
     status = stub->PrepareDeployment(&context, request, &response);
   } else if (action == RpcAction::Activate) {
     vektor::agent::v1::ActivateDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
+    request.set_operation_timeout_ms(rollout.operation_timeout.count());
+    request.set_readiness_timeout_ms(rollout.readiness_timeout.count());
+    request.set_allow_degraded(rollout.allow_degraded);
     status = stub->ActivateDeployment(&context, request, &response);
   } else if (action == RpcAction::Rollback) {
     vektor::agent::v1::RollbackDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
+    request.set_operation_timeout_ms(rollout.operation_timeout.count());
     status = stub->RollbackDeployment(&context, request, &response);
   } else {
     vektor::agent::v1::GetDeploymentRequest request;
     status = stub->GetDeployment(&context, request, &response);
   }
-  if (!status.ok())
-    return {robot.id, false,
-            status.error_message().empty() ? "deployment RPC failed"
-                                           : status.error_message()};
-  if (response.schema_version() != 3 ||
+  if (!status.ok()) {
+    const auto failure = status.error_message().empty()
+                             ? "deployment RPC failed"
+                             : status.error_message();
+    grpc::ClientContext recovery_context;
+    recovery_context.set_deadline(std::chrono::system_clock::now() +
+                                  fleet.request_timeout);
+    vektor::agent::v1::GetDeploymentRequest recovery_request;
+    vektor::agent::v1::DeploymentRecord recovery_response;
+    const auto recovery_status = stub->GetDeployment(
+        &recovery_context, recovery_request, &recovery_response);
+    if (recovery_status.ok() && recovery_response.schema_version() == 4 &&
+        recovery_response.deployment_id() == rollout.deployment_id)
+      return {robot.id, false, failure,
+              response_phase_name(recovery_response.phase()),
+              response_operation_name(
+                  recovery_response.reconciliation_operation())};
+    return {robot.id, false, failure};
+  }
+  if (response.schema_version() != 4 ||
       response.deployment_id() != rollout.deployment_id)
     return {robot.id, false, "invalid deployment response from agent"};
   if (action == RpcAction::Prepare &&
@@ -295,8 +351,8 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
            workload_fingerprint(rollout.workload) ||
        response.observed_workload_fingerprint() !=
            workload_fingerprint(rollout.workload) ||
-       !response.runtime_running() || !response.runtime_managed() ||
-       response.drift_detected()))
+       !response.runtime_running() || !response.runtime_ready() ||
+       !response.runtime_managed() || response.drift_detected()))
     return {robot.id, false, "desired and observed runtime state do not match"};
   if (action == RpcAction::Rollback &&
       response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_ROLLED_BACK)
@@ -304,8 +360,11 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
   auto message = response.message();
   if (action == RpcAction::Activate || action == RpcAction::Observe)
     message += "; observed " + response.observed_artifact() + " as " +
-               response.runtime_id();
-  return {robot.id, true, std::move(message)};
+               response.runtime_id() + " (" +
+               response.runtime_readiness_status() + ")";
+  return {robot.id, true, std::move(message),
+          response_phase_name(response.phase()),
+          response_operation_name(response.reconciliation_operation())};
 }
 
 std::vector<RolloutRobotResult>
@@ -431,8 +490,8 @@ RolloutConfig load_rollout_config(const std::string &path) {
   }
   reject_unknown(root,
                  {"schema_version", "deployment_id", "artifact", "fleet_config",
-                  "state_file", "operation_timeout_ms", "settle_time_ms",
-                  "allow_degraded", "workload", "waves"},
+                  "state_file", "operation_timeout_ms", "readiness_timeout_ms",
+                  "settle_time_ms", "allow_degraded", "workload", "waves"},
                  "root");
   if (!root["schema_version"] || root["schema_version"].as<unsigned int>() != 1)
     invalid("schema_version", "must be 1");
@@ -458,6 +517,13 @@ RolloutConfig load_rollout_config(const std::string &path) {
   if (operation_timeout <= 0)
     invalid("operation_timeout_ms", "must be greater than zero");
   config.operation_timeout = std::chrono::milliseconds(operation_timeout);
+  const auto readiness_timeout =
+      root["readiness_timeout_ms"]
+          ? root["readiness_timeout_ms"].as<long long>()
+          : 30000;
+  if (readiness_timeout <= 0)
+    invalid("readiness_timeout_ms", "must be greater than zero");
+  config.readiness_timeout = std::chrono::milliseconds(readiness_timeout);
   const auto settle =
       root["settle_time_ms"] ? root["settle_time_ms"].as<long long>() : 5000;
   if (settle < 0)
@@ -587,12 +653,16 @@ void print_rollout_report(const RolloutReport &report, std::ostream &out) {
   out << "message: " << report.message << '\n';
   for (const auto &robot : report.robots)
     out << '[' << (robot.success ? "ok" : "failed") << "] " << robot.robot_id
-        << " - " << robot.message << '\n';
+        << " - " << robot.message
+        << (robot.phase.empty() ? ""
+                                : " [phase=" + robot.phase +
+                                      ", operation=" + robot.operation + "]")
+        << '\n';
 }
 
 std::string rollout_report_to_json(const RolloutReport &report) {
   std::ostringstream out;
-  out << "{\"schema_version\":1,\"deployment_id\":"
+  out << "{\"schema_version\":2,\"deployment_id\":"
       << json_string(report.deployment_id)
       << ",\"action\":" << json_string(report.action)
       << ",\"wave\":" << json_string(report.wave)
@@ -606,7 +676,9 @@ std::string rollout_report_to_json(const RolloutReport &report) {
     const auto &robot = report.robots[index];
     out << "{\"id\":" << json_string(robot.robot_id)
         << ",\"success\":" << (robot.success ? "true" : "false")
-        << ",\"message\":" << json_string(robot.message) << '}';
+        << ",\"message\":" << json_string(robot.message)
+        << ",\"phase\":" << json_string(robot.phase)
+        << ",\"operation\":" << json_string(robot.operation) << '}';
   }
   out << "]}";
   return out.str();

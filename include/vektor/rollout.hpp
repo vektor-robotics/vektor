@@ -25,6 +25,7 @@ struct RolloutConfig {
   std::filesystem::path fleet_config_path;
   std::filesystem::path state_path;
   std::chrono::milliseconds operation_timeout{300000};
+  std::chrono::milliseconds readiness_timeout{30000};
   std::chrono::milliseconds settle_time{5000};
   bool allow_degraded{false};
   std::vector<DeploymentWave> waves;
@@ -34,6 +35,8 @@ struct RolloutRobotResult {
   std::string robot_id;
   bool success{false};
   std::string message;
+  std::string phase;
+  std::string operation;
 };
 
 struct RolloutReport {

@@ -57,6 +57,14 @@ enum RuntimeNetworkMode {
   RUNTIME_NETWORK_MODE_NONE = 3;
 }
 
+enum ReconciliationOperation {
+  RECONCILIATION_OPERATION_UNSPECIFIED = 0;
+  RECONCILIATION_OPERATION_NONE = 1;
+  RECONCILIATION_OPERATION_PREPARING = 2;
+  RECONCILIATION_OPERATION_ACTIVATING = 3;
+  RECONCILIATION_OPERATION_ROLLING_BACK = 4;
+}
+
 message EnvironmentVariable {
   string name = 1;
   string value = 2;
@@ -99,17 +107,31 @@ message DeploymentRecord {
   RuntimeWorkloadSpec previous_workload = 14;
   string workload_fingerprint = 15;
   string observed_workload_fingerprint = 16;
+  bool runtime_ready = 17;
+  string runtime_readiness_status = 18;
+  ReconciliationOperation reconciliation_operation = 19;
+  string operation_started_at = 20;
+  uint64 operation_attempt = 21;
 }
 
 message PrepareDeploymentRequest {
   string deployment_id = 1;
   string artifact = 2;
   RuntimeWorkloadSpec workload = 3;
+  int64 operation_timeout_ms = 4;
 }
 
-message ActivateDeploymentRequest { string deployment_id = 1; }
+message ActivateDeploymentRequest {
+  string deployment_id = 1;
+  int64 operation_timeout_ms = 2;
+  int64 readiness_timeout_ms = 3;
+  bool allow_degraded = 4;
+}
 
-message RollbackDeploymentRequest { string deployment_id = 1; }
+message RollbackDeploymentRequest {
+  string deployment_id = 1;
+  int64 operation_timeout_ms = 2;
+}
 
 message GetDeploymentRequest {}
 
