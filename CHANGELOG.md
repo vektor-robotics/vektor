@@ -2,6 +2,17 @@
 
 All notable changes to VEKTOR are documented here.
 
+## Unreleased
+
+### Added
+
+- Versioned runtime-driver interface with an initial Docker/Podman backend.
+- Managed-container activation, observation, stop, and rollback operations.
+- Persistent desired and observed artifact state, runtime ID, and drift status.
+- Startup and periodic runtime drift detection.
+- Protection against replacing or stopping same-named unmanaged containers.
+- Deployment API schema v2 fields for observed runtime state.
+
 ## [0.5.0] - 2026-08-14
 
 ### Added

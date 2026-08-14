@@ -13,15 +13,25 @@ constexpr auto kArtifact =
     "ghcr.io/vektor-robotics/demo@sha256:"
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-class FakeBackend final : public vektor::ArtifactBackend {
+class FakeBackend final : public vektor::RuntimeDriver {
 public:
   void prepare(const std::string &) override {
     ++calls;
     if (on_prepare)
       on_prepare();
   }
+  vektor::RuntimeObservation activate(const std::string &artifact) override {
+    observation = {true, artifact, "test-container", true};
+    return observation;
+  }
+  vektor::RuntimeObservation stop() override {
+    observation = {};
+    return observation;
+  }
+  vektor::RuntimeObservation inspect() override { return observation; }
   int calls{0};
   std::function<void()> on_prepare;
+  vektor::RuntimeObservation observation;
 };
 
 vektor::StatusSnapshot healthy_snapshot(const std::string &robot_id) {
@@ -140,6 +150,10 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   vektor::agent::v1::DeploymentRecord response;
   ASSERT_TRUE(stub->GetDeployment(&context, request, &response).ok());
   EXPECT_EQ(response.phase(), vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE);
+  EXPECT_EQ(response.schema_version(), 2U);
+  EXPECT_EQ(response.observed_artifact(), kArtifact);
+  EXPECT_TRUE(response.runtime_running());
+  EXPECT_FALSE(response.drift_detected());
 
   const auto promoted = vektor::promote_release(config);
   EXPECT_TRUE(promoted.success);

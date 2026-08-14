@@ -29,6 +29,7 @@ struct AgentOptions {
   std::optional<std::filesystem::path> tls_client_ca;
   std::filesystem::path deployment_state_path{".vektor/deployment.yaml"};
   std::string oci_runtime{"docker"};
+  std::string runtime_container{"vektor-workload"};
 };
 
 void validate_agent_options(const AgentOptions &options);

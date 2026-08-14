@@ -58,6 +58,11 @@ message DeploymentRecord {
   DeploymentPhase phase = 5;
   string message = 6;
   string updated_at = 7;
+  string observed_artifact = 8;
+  string runtime_id = 9;
+  bool runtime_running = 10;
+  bool drift_detected = 11;
+  bool runtime_managed = 12;
 }
 
 message PrepareDeploymentRequest {

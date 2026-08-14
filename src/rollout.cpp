@@ -173,7 +173,7 @@ robots_by_id(const FleetConfig &fleet, const std::vector<std::string> &ids) {
   return robots;
 }
 
-enum class RpcAction { Prepare, Activate, Rollback };
+enum class RpcAction { Prepare, Activate, Observe, Rollback };
 
 RolloutRobotResult call_agent(const FleetConfig &fleet,
                               const FleetRobotConfig &robot,
@@ -194,19 +194,39 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     vektor::agent::v1::ActivateDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
     status = stub->ActivateDeployment(&context, request, &response);
-  } else {
+  } else if (action == RpcAction::Rollback) {
     vektor::agent::v1::RollbackDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
     status = stub->RollbackDeployment(&context, request, &response);
+  } else {
+    vektor::agent::v1::GetDeploymentRequest request;
+    status = stub->GetDeployment(&context, request, &response);
   }
   if (!status.ok())
     return {robot.id, false,
             status.error_message().empty() ? "deployment RPC failed"
                                            : status.error_message()};
-  if (response.schema_version() != 1 ||
+  if (response.schema_version() != 2 ||
       response.deployment_id() != rollout.deployment_id)
     return {robot.id, false, "invalid deployment response from agent"};
-  return {robot.id, true, response.message()};
+  if (action == RpcAction::Prepare &&
+      response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_STAGED)
+    return {robot.id, false, "agent did not stage the deployment"};
+  if ((action == RpcAction::Activate || action == RpcAction::Observe) &&
+      (response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE ||
+       response.artifact() != rollout.artifact ||
+       response.observed_artifact() != rollout.artifact ||
+       !response.runtime_running() || !response.runtime_managed() ||
+       response.drift_detected()))
+    return {robot.id, false, "desired and observed runtime state do not match"};
+  if (action == RpcAction::Rollback &&
+      response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_ROLLED_BACK)
+    return {robot.id, false, "agent did not complete rollback"};
+  auto message = response.message();
+  if (action == RpcAction::Activate || action == RpcAction::Observe)
+    message += "; observed " + response.observed_artifact() + " as " +
+               response.runtime_id();
+  return {robot.id, true, std::move(message)};
 }
 
 std::vector<RolloutRobotResult>
@@ -436,6 +456,17 @@ RolloutReport promote_release(const RolloutConfig &config) {
               state.next_wave,
               {},
               "active-wave health gate failed; promotion paused"};
+    const auto observed =
+        call_agents(fleet, active.robots, config, RpcAction::Observe);
+    if (!all_succeeded(observed))
+      return {config.deployment_id,
+              "promote",
+              {},
+              false,
+              false,
+              state.next_wave,
+              observed,
+              "active-wave runtime drift detected; promotion paused"};
   }
   auto report = execute_wave(config, state, fleet);
   report.action = "promote";

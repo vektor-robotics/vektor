@@ -36,6 +36,7 @@ struct CliOptions {
   std::optional<std::size_t> limit;
   std::filesystem::path deployment_state{".vektor/deployment.yaml"};
   std::string oci_runtime{"docker"};
+  std::string runtime_container{"vektor-workload"};
 };
 
 [[noreturn]] void usage_error(const std::string &message = {}) {
@@ -54,6 +55,7 @@ struct CliOptions {
             << "                (--tls-cert <path> --tls-key <path> "
                "--tls-ca <path>|--insecure)\n"
             << "                [--oci-runtime docker|podman] "
+               "[--runtime-container <name>] "
                "[--deployment-state <path>]\n"
             << "  vektor fleet  --config <path> [--format text|json] "
                "[--selector key=value]...\n"
@@ -123,6 +125,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.deployment_state = next_value(index, argc, argv, argument);
     else if (argument == "--oci-runtime")
       options.oci_runtime = next_value(index, argc, argv, argument);
+    else if (argument == "--runtime-container")
+      options.runtime_container = next_value(index, argc, argv, argument);
     else if (argument == "--selector")
       options.selectors.push_back(next_value(index, argc, argv, argument));
     else if (argument == "--limit") {
@@ -154,6 +158,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.tls_private_key || options.tls_client_ca ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.oci_runtime != "docker" ||
+       options.runtime_container != "vektor-workload" ||
        options.listen_address != "127.0.0.1:50051" ||
        !options.selectors.empty() || options.limit))
     usage_error("status-only option used with check");
@@ -162,7 +167,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.oci_runtime != "docker" || !options.selectors.empty() ||
-       options.limit))
+       options.runtime_container != "vektor-workload" || options.limit))
     usage_error("agent-only option used with status");
   if (options.command == "agent" &&
       (options.watch || options.format != "text" ||
@@ -173,7 +178,8 @@ CliOptions parse_cli(int argc, char **argv) {
        options.insecure || options.tls_certificate || options.tls_private_key ||
        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
        options.deployment_state != ".vektor/deployment.yaml" ||
-       options.oci_runtime != "docker"))
+       options.oci_runtime != "docker" ||
+       options.runtime_container != "vektor-workload"))
     usage_error("option is not supported by fleet");
   const bool rollout_command = options.command == "deploy" ||
                                options.command == "promote" ||
@@ -186,6 +192,7 @@ CliOptions parse_cli(int argc, char **argv) {
        !options.selectors.empty() || options.limit ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.oci_runtime != "docker" ||
+       options.runtime_container != "vektor-workload" ||
        options.interval != std::chrono::milliseconds(5000)))
     usage_error("option is not supported by rollout commands");
   return options;
@@ -255,6 +262,7 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   agent_options.tls_client_ca = options.tls_client_ca;
   agent_options.deployment_state_path = options.deployment_state;
   agent_options.oci_runtime = options.oci_runtime;
+  agent_options.runtime_container = options.runtime_container;
   const auto robot_id =
       options.robot_id.empty() ? config.robot_id : options.robot_id;
   return vektor::AgentRunner(node, config, robot_id, std::move(agent_options))
