@@ -1,4 +1,7 @@
 # VEKTOR milestone 1 health policy.
+robot_id: robot-001
+discovery_timeout_ms: 750
+
 required_nodes:
   - /localization
   - /planner

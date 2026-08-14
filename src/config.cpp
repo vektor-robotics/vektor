@@ -68,13 +68,19 @@ CheckConfig load_config(const std::string &path) {
     invalid("root", "expected a mapping");
 
   static const std::set<std::string> allowed_keys{
-      "required_nodes", "required_topics", "required_tf", "lifecycle"};
+      "robot_id",        "discovery_timeout_ms", "required_nodes",
+      "required_topics", "required_tf",          "lifecycle"};
   for (const auto &entry : root) {
     const auto key = entry.first.as<std::string>();
     if (!allowed_keys.contains(key))
       invalid(key, "unknown top-level field");
   }
   CheckConfig config;
+
+  if (const auto robot_id = root["robot_id"]; robot_id)
+    config.robot_id = require_string(robot_id, "robot_id");
+  config.discovery_timeout = positive_milliseconds(root, "discovery_timeout_ms",
+                                                   500, "discovery_timeout_ms");
 
   if (const auto nodes = root["required_nodes"]; nodes) {
     require_sequence(nodes, "required_nodes");

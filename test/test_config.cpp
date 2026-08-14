@@ -7,7 +7,8 @@
 TEST(Config, ParsesAllRequirementTypes) {
   const auto path = std::string("vektor_test_config.yaml");
   std::ofstream file(path);
-  file << "required_nodes: [/planner]\n"
+  file << "robot_id: test-robot\ndiscovery_timeout_ms: 250\n"
+       << "required_nodes: [/planner]\n"
        << "required_topics:\n  - name: /cmd_vel\n    min_frequency_hz: 5\n"
        << "    sample_window_ms: 200\n    reliability: best_effort\n    "
           "qos_depth: 5\n"
@@ -17,6 +18,8 @@ TEST(Config, ParsesAllRequirementTypes) {
        << "    service_timeout_ms: 400\n    request_timeout_ms: 500\n";
   file.close();
   const auto config = vektor::load_config(path);
+  EXPECT_EQ(config.robot_id, "test-robot");
+  EXPECT_EQ(config.discovery_timeout.count(), 250);
   EXPECT_EQ(config.required_nodes.size(), 1u);
   EXPECT_EQ(config.required_topics.front().sample_window.count(), 200);
   EXPECT_EQ(config.required_topics.front().reliability,

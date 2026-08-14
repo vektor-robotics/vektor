@@ -21,6 +21,7 @@ add_library(vektor_core
   src/config.cpp
   src/health_inspector.cpp
   src/reporter.cpp
+  src/status.cpp
 )
 target_include_directories(vektor_core PUBLIC include)
 target_link_libraries(vektor_core yaml-cpp)
@@ -63,6 +64,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_reporter test/test_reporter.cpp)
   target_link_libraries(test_reporter vektor_core)
+
+  ament_add_gtest(test_status test/test_status.cpp)
+  target_link_libraries(test_status vektor_core)
 endif()
 
 ament_export_include_directories(include)

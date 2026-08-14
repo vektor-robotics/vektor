@@ -1,4 +1,7 @@
 # Self-test policy for: ros2 run demo_nodes_cpp talker
+robot_id: talker-demo
+discovery_timeout_ms: 750
+
 required_nodes:
   - /talker
 

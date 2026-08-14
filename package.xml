@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>vektor</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>Health-aware software delivery primitives for autonomous-machine fleets.</description>
-  <maintainer email="maintainers@example.com">VEKTOR maintainers</maintainer>
+  <maintainer email="nahid633@users.noreply.github.com">Nahid Guliyev</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

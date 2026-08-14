@@ -15,6 +15,7 @@ struct CheckResult {
   std::string category;
   std::string target;
   std::string message;
+  std::chrono::milliseconds duration{0};
 };
 
 class HealthInspector {

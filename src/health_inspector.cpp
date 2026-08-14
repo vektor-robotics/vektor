@@ -8,6 +8,7 @@
 #include <cmath>
 #include <memory>
 #include <sstream>
+#include <thread>
 
 namespace vektor {
 
@@ -22,12 +23,19 @@ std::string fully_qualified_node_name(const std::string &name,
 std::string normalize_node_name(const std::string &name) {
   return name.front() == '/' ? name : "/" + name;
 }
+
+std::chrono::milliseconds
+elapsed_since(std::chrono::steady_clock::time_point started_at) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started_at);
+}
 } // namespace
 
 HealthInspector::HealthInspector(const rclcpp::Node::SharedPtr &node)
     : node_(node) {}
 
 CheckResult HealthInspector::check_node(const NodeRequirement &requirement) {
+  const auto started_at = std::chrono::steady_clock::now();
   const auto graph =
       node_->get_node_graph_interface()->get_node_names_and_namespaces();
   const auto expected = normalize_node_name(requirement.name);
@@ -37,7 +45,8 @@ CheckResult HealthInspector::check_node(const NodeRequirement &requirement) {
       });
   return {present ? CheckStatus::Pass : CheckStatus::Fail, "node",
           requirement.name,
-          present ? "node is present" : "required node is not present"};
+          present ? "node is present" : "required node is not present",
+          elapsed_since(started_at)};
 }
 
 std::vector<CheckResult> HealthInspector::check_topics(
@@ -70,7 +79,7 @@ std::vector<CheckResult> HealthInspector::check_topics(
     if (requirement.min_frequency_hz <= 0.0 &&
         requirement.max_frequency_hz <= 0.0) {
       results[index] = {CheckStatus::Pass, "topic", requirement.name,
-                        "topic exists"};
+                        "topic exists", std::chrono::milliseconds(0)};
       continue;
     }
 
@@ -138,13 +147,15 @@ std::vector<CheckResult> HealthInspector::check_topics(
         requirement.name,
         min_ok && max_ok
             ? message.str()
-            : message.str() + "; outside configured frequency limits"};
+            : message.str() + "; outside configured frequency limits",
+        requirement.sample_window};
     monitor->subscription.reset();
   }
   return results;
 }
 
 CheckResult HealthInspector::check_tf(const TfRequirement &requirement) {
+  const auto started_at = std::chrono::steady_clock::now();
   tf2_ros::Buffer buffer(node_->get_clock());
   tf2_ros::TransformListener listener(buffer, node_, false);
   rclcpp::executors::SingleThreadedExecutor executor;
@@ -159,7 +170,7 @@ CheckResult HealthInspector::check_tf(const TfRequirement &requirement) {
       executor.remove_node(node_);
       return {CheckStatus::Pass, "tf",
               requirement.target_frame + " <- " + requirement.source_frame,
-              "transform is available"};
+              "transform is available", elapsed_since(started_at)};
     } catch (const tf2::TransformException &error) {
       last_error = error.what();
     }
@@ -167,16 +178,17 @@ CheckResult HealthInspector::check_tf(const TfRequirement &requirement) {
   executor.remove_node(node_);
   return {CheckStatus::Fail, "tf",
           requirement.target_frame + " <- " + requirement.source_frame,
-          last_error};
+          last_error, elapsed_since(started_at)};
 }
 
 CheckResult
 HealthInspector::check_lifecycle(const LifecycleRequirement &requirement) {
+  const auto started_at = std::chrono::steady_clock::now();
   const auto service = normalize_node_name(requirement.node) + "/get_state";
   auto client = node_->create_client<lifecycle_msgs::srv::GetState>(service);
   if (!client->wait_for_service(requirement.service_timeout)) {
     return {CheckStatus::Fail, "lifecycle", requirement.node,
-            "get_state service unavailable"};
+            "get_state service unavailable", elapsed_since(started_at)};
   }
   auto future = client->async_send_request(
       std::make_shared<lifecycle_msgs::srv::GetState::Request>());
@@ -184,17 +196,19 @@ HealthInspector::check_lifecycle(const LifecycleRequirement &requirement) {
                                          requirement.request_timeout) !=
       rclcpp::FutureReturnCode::SUCCESS) {
     return {CheckStatus::Fail, "lifecycle", requirement.node,
-            "get_state request timed out"};
+            "get_state request timed out", elapsed_since(started_at)};
   }
   const auto response = future.get();
   const bool ok = response->current_state.label == requirement.state;
   return {ok ? CheckStatus::Pass : CheckStatus::Fail, "lifecycle",
           requirement.node,
           "state is " + response->current_state.label + ", expected " +
-              requirement.state};
+              requirement.state,
+          elapsed_since(started_at)};
 }
 
 std::vector<CheckResult> HealthInspector::inspect(const CheckConfig &config) {
+  std::this_thread::sleep_for(config.discovery_timeout);
   std::vector<CheckResult> results;
   for (const auto &item : config.required_nodes)
     results.push_back(check_node(item));

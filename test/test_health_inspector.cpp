@@ -18,12 +18,18 @@ protected:
   static void SetUpTestSuite() { rclcpp::init(0, nullptr); }
 
   static void TearDownTestSuite() { rclcpp::shutdown(); }
+
+  static vektor::CheckConfig fast_config() {
+    vektor::CheckConfig config;
+    config.discovery_timeout = 1ms;
+    return config;
+  }
 };
 
 TEST_F(HealthInspectorTest, FindsFullyQualifiedNodeName) {
   auto inspector_node = std::make_shared<rclcpp::Node>("inspector_node");
   auto subject = std::make_shared<rclcpp::Node>("controller", "/robot_1");
-  vektor::CheckConfig config;
+  auto config = fast_config();
   config.required_nodes.push_back({"/robot_1/controller"});
 
   std::vector<vektor::CheckResult> results;
@@ -62,7 +68,7 @@ TEST_F(HealthInspectorTest, MeasuresTopicFrequencyWithConfiguredQos) {
     }
   });
 
-  vektor::CheckConfig config;
+  auto config = fast_config();
   vektor::TopicRequirement topic;
   topic.name = "/vektor_test/heartbeat";
   topic.min_frequency_hz = 10.0;
@@ -106,7 +112,7 @@ TEST_F(HealthInspectorTest, SamplesMultipleTopicsConcurrently) {
     }
   });
 
-  vektor::CheckConfig config;
+  auto config = fast_config();
   for (const auto *name : {"/vektor_test/first", "/vektor_test/second"}) {
     vektor::TopicRequirement topic;
     topic.name = name;
@@ -139,7 +145,7 @@ TEST_F(HealthInspectorTest, FindsStaticTransformWithinTimeout) {
   transform.transform.rotation.w = 1.0;
   broadcaster.sendTransform(transform);
 
-  vektor::CheckConfig config;
+  auto config = fast_config();
   config.required_tf.push_back(
       {"vektor_map", "vektor_base_link", std::chrono::milliseconds(1500)});
   const auto results = vektor::HealthInspector(inspector_node).inspect(config);
@@ -163,7 +169,7 @@ TEST_F(HealthInspectorTest, ReadsLifecycleStateService) {
   service_executor.add_node(service_node);
   std::thread service_thread([&]() { service_executor.spin(); });
 
-  vektor::CheckConfig config;
+  auto config = fast_config();
   config.lifecycle.push_back(
       {"/vektor_test_controller", "active", 1500ms, 1500ms});
   const auto results = vektor::HealthInspector(inspector_node).inspect(config);

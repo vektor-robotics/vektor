@@ -2,7 +2,10 @@
 
 Safe software delivery for autonomous machines.
 
-VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets. The first milestone is `vektor check`: a pre-deployment health inspector that reads a YAML policy and verifies the live ROS graph.
+VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets.
+`vektor check` validates a live ROS graph, while `vektor status` produces a
+timestamped machine-health snapshot for operators, scripts, and future fleet
+agents.
 
 ## Milestone 1 checks
 
@@ -16,13 +19,32 @@ VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets. The fir
 
 The check exits `0` only when every configured check passes, `1` when a health check fails, and `2` for invalid CLI/configuration errors.
 
+## Status snapshots
+
+```bash
+vektor status --config config/example.yaml
+vektor status --config config/example.yaml --format json
+vektor status --config config/example.yaml --watch --interval-ms 5000
+```
+
+Snapshots include the robot ID, hostname, UTC timestamp, ROS domain ID, overall
+state, total inspection duration, and individual check durations. Overall state
+is one of `healthy`, `degraded`, `unhealthy`, or `unreachable`.
+
+By default, `status` keeps the latest 100 JSON snapshots at
+`$XDG_STATE_HOME/vektor/status.jsonl` or
+`~/.local/state/vektor/status.jsonl`. Override this with `--history <path>` or
+disable persistence with `--no-history`. `--robot-id` overrides `robot_id` from
+the policy.
+
 ## Repository layout
 
 ```text
 include/vektor/       Public C++ interfaces
 src/config.cpp        YAML policy loading
 src/health_inspector  ROS 2 graph, frequency, TF, lifecycle checks
-src/reporter.cpp      Stable human-readable output and exit semantics
+src/reporter.cpp      Check output and exit semantics
+src/status.cpp        Fleet-ready snapshots and bounded local history
 src/main.cpp          CLI entry point
 config/example.yaml   Example health policy
 test/                 GoogleTest coverage
@@ -89,7 +111,10 @@ The node and topic-frequency checks should pass. Node names in policy may be bar
 
 ### Policy options
 
-Topic mappings accept `min_frequency_hz`, `max_frequency_hz`, `sample_window_ms`,
+The optional top-level `robot_id` identifies the machine, and
+`discovery_timeout_ms` controls how long a new inspector waits for DDS graph
+discovery. Topic mappings accept
+`min_frequency_hz`, `max_frequency_hz`, `sample_window_ms`,
 `reliability` (`system_default`, `reliable`, or `best_effort`), and `qos_depth`.
 TF mappings accept `timeout_ms`. Lifecycle mappings accept `state`,
 `service_timeout_ms`, and `request_timeout_ms`. Unknown top-level fields and
@@ -102,10 +127,16 @@ colcon test --packages-select vektor
 colcon test-result --verbose
 ```
 
-## Current limitations
+## Roadmap
 
-Topic-frequency policies are sampled concurrently, so check duration is bounded by
-the longest configured sampling window rather than the sum of all windows.
+Milestone 2 adds status snapshots and watch mode. The next milestone introduces a
+lightweight `vektor-agent` and gRPC API, followed by fleet inventory, progressive
+deployment, promotion, and rollback. See `ROADMAP.md`.
+
+## Contributing and security
+
+Contributions are welcome. See `CONTRIBUTING.md` for the development workflow and
+`SECURITY.md` for private vulnerability reporting guidance.
 
 ## License
 

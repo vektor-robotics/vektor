@@ -35,6 +35,8 @@ struct LifecycleRequirement {
 };
 
 struct CheckConfig {
+  std::string robot_id;
+  std::chrono::milliseconds discovery_timeout{500};
   std::vector<NodeRequirement> required_nodes;
   std::vector<TopicRequirement> required_topics;
   std::vector<TfRequirement> required_tf;
