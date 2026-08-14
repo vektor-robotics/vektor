@@ -1,0 +1,11 @@
+# Self-test policy for: ros2 run demo_nodes_cpp talker
+required_nodes:
+  - /talker
+
+required_topics:
+  - name: /chatter
+    min_frequency_hz: 1.0
+    max_frequency_hz: 5.0
+    sample_window_ms: 2000
+    reliability: reliable
+    qos_depth: 10

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  jazzy:
+    name: ROS 2 Jazzy / Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base-noble
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y ros-dev-tools libyaml-cpp-dev
+          rosdep update
+          rosdep install --from-paths . --ignore-src -r -y
+
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --event-handlers console_direct+ \
+            --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Test
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          colcon test --packages-select vektor --event-handlers console_direct+
+          colcon test-result --verbose

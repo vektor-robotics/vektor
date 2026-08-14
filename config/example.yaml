@@ -1,0 +1,27 @@
+# VEKTOR milestone 1 health policy.
+required_nodes:
+  - /localization
+  - /planner
+  - /controller
+
+required_topics:
+  - name: /odom
+    min_frequency_hz: 10.0
+    sample_window_ms: 1000
+    reliability: best_effort
+    qos_depth: 10
+  - name: /cmd_vel
+    min_frequency_hz: 1.0
+    max_frequency_hz: 20.0
+    sample_window_ms: 1000
+
+required_tf:
+  - target_frame: map
+    source_frame: base_link
+    timeout_ms: 1500
+
+lifecycle:
+  - node: /controller
+    state: active
+    service_timeout_ms: 1000
+    request_timeout_ms: 1000
