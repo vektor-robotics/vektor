@@ -17,7 +17,10 @@ struct DeploymentRecord {
   std::string deployment_id;
   std::string artifact;
   std::string previous_artifact;
+  WorkloadSpec workload;
+  WorkloadSpec previous_workload;
   std::string observed_artifact;
+  std::string observed_workload_fingerprint;
   std::string runtime_id;
   bool runtime_running{false};
   bool runtime_managed{false};
@@ -37,7 +40,8 @@ public:
                        std::shared_ptr<RuntimeDriver> runtime);
 
   DeploymentRecord prepare(const std::string &deployment_id,
-                           const std::string &artifact);
+                           const std::string &artifact,
+                           WorkloadSpec workload = {});
   DeploymentRecord activate(const std::string &deployment_id);
   DeploymentRecord rollback(const std::string &deployment_id);
   DeploymentRecord refresh_observed();
@@ -57,5 +61,8 @@ private:
 };
 
 vektor::agent::v1::DeploymentRecord to_proto(const DeploymentRecord &record);
+vektor::agent::v1::RuntimeWorkloadSpec to_proto(const WorkloadSpec &spec);
+WorkloadSpec from_proto(const vektor::agent::v1::RuntimeWorkloadSpec &spec,
+                        bool use_defaults_for_unspecified = true);
 
 } // namespace vektor

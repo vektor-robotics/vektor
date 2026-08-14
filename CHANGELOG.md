@@ -11,7 +11,10 @@ All notable changes to VEKTOR are documented here.
 - Persistent desired and observed artifact state, runtime ID, and drift status.
 - Startup and periodic runtime drift detection.
 - Protection against replacing or stopping same-named unmanaged containers.
-- Deployment API schema v2 fields for observed runtime state.
+- Strict workload configuration for network mode, restart policy, environment,
+  bind mounts, devices, and command arguments.
+- Restart-safe restoration of the previous artifact and workload configuration.
+- Deployment API schema v3 fields for observed runtime and workload state.
 
 ## [0.5.0] - 2026-08-14
 

@@ -157,17 +157,26 @@ process restart does not silently advance a release. OCI references must use
 short health-request timeout.
 
 The initial runtime driver manages one container, named `vektor-workload` by
-default, with host networking and `unless-stopped` restart behavior. Override
-the name with `--runtime-container`. VEKTOR labels containers it creates and
-refuses to replace or stop a same-named container without that ownership label.
+default. Override the name with `--runtime-container`. A strict optional
+`workload` mapping in the rollout config controls `network` (`host`, `bridge`,
+or `none`), `restart_policy`, environment variables, bind mounts, device
+mappings, and the command passed after the image. VEKTOR passes every value as a
+separate process argument without invoking a shell. Mount and device paths must
+be absolute, and duplicate targets or invalid environment names are rejected.
+Do not place secrets directly in environment values because rollout and agent
+state are operational configuration, not a secrets store.
+
+VEKTOR labels containers it creates and refuses to replace or stop a same-named
+container without that ownership label.
 Desired and observed artifacts, the runtime container ID, ownership, running
 state, and drift status are persisted atomically and returned by
 `GetDeployment`. The agent rechecks observed state after restart, during health
 inspection, and when deployment state is requested.
 
-This v0.6 foundation intentionally supports a single container without custom
-mounts, environment variables, device mappings, or launch arguments. Those
-workload-spec capabilities and readiness handling remain before v0.6 is
+The current v0.6 implementation supports one managed container per agent. Its
+workload specification is persisted alongside the artifact, and rollback
+restores the previous artifact and its exact previous workload settings.
+Runtime readiness and timeout/crash-recovery hardening remain before v0.6 is
 complete.
 
 ## Repository layout

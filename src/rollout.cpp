@@ -19,6 +19,7 @@ namespace {
 struct StoredRollout {
   std::string deployment_id;
   std::string artifact;
+  std::string workload_fingerprint;
   std::size_t next_wave{0};
   std::vector<std::string> applied_robots;
   bool complete{false};
@@ -50,6 +51,72 @@ void reject_unknown(const YAML::Node &node,
     if (!allowed.contains(key))
       invalid(field + "." + key, "unknown field");
   }
+}
+
+WorkloadSpec parse_workload(const YAML::Node &node) {
+  WorkloadSpec spec;
+  if (!node)
+    return spec;
+  reject_unknown(node,
+                 {"network", "restart_policy", "environment", "mounts",
+                  "devices", "command"},
+                 "workload");
+  if (node["network"])
+    spec.network =
+        parse_network_mode(require_string(node["network"], "workload.network"));
+  if (node["restart_policy"])
+    spec.restart_policy =
+        require_string(node["restart_policy"], "workload.restart_policy");
+  if (const auto environment = node["environment"]; environment) {
+    if (!environment.IsMap())
+      invalid("workload.environment", "expected a mapping");
+    for (const auto &entry : environment) {
+      if (!entry.first.IsScalar() || !entry.second.IsScalar())
+        invalid("workload.environment", "expected scalar names and values");
+      const auto name = entry.first.as<std::string>();
+      if (!spec.environment.emplace(name, entry.second.as<std::string>())
+               .second)
+        invalid("workload.environment." + name, "duplicate variable");
+    }
+  }
+  if (const auto mounts = node["mounts"]; mounts) {
+    if (!mounts.IsSequence())
+      invalid("workload.mounts", "expected a sequence");
+    for (std::size_t index = 0; index < mounts.size(); ++index) {
+      const auto field = "workload.mounts[" + std::to_string(index) + "]";
+      reject_unknown(mounts[index], {"source", "target", "read_only"}, field);
+      spec.mounts.push_back(
+          {require_string(mounts[index]["source"], field + ".source"),
+           require_string(mounts[index]["target"], field + ".target"),
+           mounts[index]["read_only"] &&
+               mounts[index]["read_only"].as<bool>()});
+    }
+  }
+  if (const auto devices = node["devices"]; devices) {
+    if (!devices.IsSequence())
+      invalid("workload.devices", "expected a sequence");
+    for (std::size_t index = 0; index < devices.size(); ++index) {
+      const auto field = "workload.devices[" + std::to_string(index) + "]";
+      reject_unknown(devices[index], {"host_path", "container_path"}, field);
+      spec.devices.push_back(
+          {require_string(devices[index]["host_path"], field + ".host_path"),
+           require_string(devices[index]["container_path"],
+                          field + ".container_path")});
+    }
+  }
+  if (const auto command = node["command"]; command) {
+    if (!command.IsSequence())
+      invalid("workload.command", "expected a sequence");
+    for (std::size_t index = 0; index < command.size(); ++index)
+      spec.command.push_back(require_string(
+          command[index], "workload.command[" + std::to_string(index) + "]"));
+  }
+  try {
+    validate_workload_spec(spec);
+  } catch (const std::invalid_argument &error) {
+    invalid("workload", error.what());
+  }
+  return spec;
 }
 
 std::filesystem::path resolve_path(const std::filesystem::path &base,
@@ -93,15 +160,20 @@ StoredRollout load_state(const RolloutConfig &config, bool required) {
     if (required)
       throw std::runtime_error(
           "rollout has not been started; run deploy first");
-    return {config.deployment_id, config.artifact};
+    return {config.deployment_id, config.artifact,
+            workload_fingerprint(config.workload)};
   }
   try {
     const auto root = YAML::LoadFile(config.state_path.string());
-    if (root["schema_version"].as<unsigned int>() != 1)
+    const auto schema_version = root["schema_version"].as<unsigned int>();
+    if (schema_version != 1 && schema_version != 2)
       throw std::runtime_error("unsupported rollout state schema");
     StoredRollout state;
     state.deployment_id = root["deployment_id"].as<std::string>();
     state.artifact = root["artifact"].as<std::string>();
+    state.workload_fingerprint =
+        schema_version >= 2 ? root["workload_fingerprint"].as<std::string>()
+                            : workload_fingerprint(WorkloadSpec{});
     state.next_wave = root["next_wave"].as<std::size_t>();
     state.complete = root["complete"].as<bool>();
     state.recovery_required = root["recovery_required"]
@@ -110,7 +182,8 @@ StoredRollout load_state(const RolloutConfig &config, bool required) {
     for (const auto &robot : root["applied_robots"])
       state.applied_robots.push_back(robot.as<std::string>());
     if (state.deployment_id != config.deployment_id ||
-        state.artifact != config.artifact)
+        state.artifact != config.artifact ||
+        state.workload_fingerprint != workload_fingerprint(config.workload))
       throw std::runtime_error("rollout state does not match this config");
     return state;
   } catch (const std::exception &error) {
@@ -124,14 +197,15 @@ void save_state(const RolloutConfig &config, const StoredRollout &state) {
   if (!parent.empty())
     std::filesystem::create_directories(parent);
   YAML::Emitter output;
-  output << YAML::BeginMap << YAML::Key << "schema_version" << YAML::Value << 1
+  output << YAML::BeginMap << YAML::Key << "schema_version" << YAML::Value << 2
          << YAML::Key << "deployment_id" << YAML::Value << state.deployment_id
          << YAML::Key << "artifact" << YAML::Value << state.artifact
-         << YAML::Key << "next_wave" << YAML::Value << state.next_wave
-         << YAML::Key << "complete" << YAML::Value << state.complete
-         << YAML::Key << "recovery_required" << YAML::Value
-         << state.recovery_required << YAML::Key << "applied_robots"
-         << YAML::Value << YAML::BeginSeq;
+         << YAML::Key << "workload_fingerprint" << YAML::Value
+         << state.workload_fingerprint << YAML::Key << "next_wave"
+         << YAML::Value << state.next_wave << YAML::Key << "complete"
+         << YAML::Value << state.complete << YAML::Key << "recovery_required"
+         << YAML::Value << state.recovery_required << YAML::Key
+         << "applied_robots" << YAML::Value << YAML::BeginSeq;
   for (const auto &robot : state.applied_robots)
     output << robot;
   output << YAML::EndSeq << YAML::EndMap;
@@ -189,6 +263,7 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     vektor::agent::v1::PrepareDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
     request.set_artifact(rollout.artifact);
+    *request.mutable_workload() = to_proto(rollout.workload);
     status = stub->PrepareDeployment(&context, request, &response);
   } else if (action == RpcAction::Activate) {
     vektor::agent::v1::ActivateDeploymentRequest request;
@@ -206,7 +281,7 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     return {robot.id, false,
             status.error_message().empty() ? "deployment RPC failed"
                                            : status.error_message()};
-  if (response.schema_version() != 2 ||
+  if (response.schema_version() != 3 ||
       response.deployment_id() != rollout.deployment_id)
     return {robot.id, false, "invalid deployment response from agent"};
   if (action == RpcAction::Prepare &&
@@ -216,6 +291,10 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
       (response.phase() != vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE ||
        response.artifact() != rollout.artifact ||
        response.observed_artifact() != rollout.artifact ||
+       response.workload_fingerprint() !=
+           workload_fingerprint(rollout.workload) ||
+       response.observed_workload_fingerprint() !=
+           workload_fingerprint(rollout.workload) ||
        !response.runtime_running() || !response.runtime_managed() ||
        response.drift_detected()))
     return {robot.id, false, "desired and observed runtime state do not match"};
@@ -353,7 +432,7 @@ RolloutConfig load_rollout_config(const std::string &path) {
   reject_unknown(root,
                  {"schema_version", "deployment_id", "artifact", "fleet_config",
                   "state_file", "operation_timeout_ms", "settle_time_ms",
-                  "allow_degraded", "waves"},
+                  "allow_degraded", "workload", "waves"},
                  "root");
   if (!root["schema_version"] || root["schema_version"].as<unsigned int>() != 1)
     invalid("schema_version", "must be 1");
@@ -364,6 +443,7 @@ RolloutConfig load_rollout_config(const std::string &path) {
   config.artifact = require_string(root["artifact"], "artifact");
   if (!is_pinned_oci_artifact(config.artifact))
     invalid("artifact", "must be pinned by a sha256 digest");
+  config.workload = parse_workload(root["workload"]);
   const auto base = std::filesystem::absolute(path).parent_path();
   config.fleet_config_path =
       resolve_path(base, require_string(root["fleet_config"], "fleet_config"));

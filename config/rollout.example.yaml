@@ -6,6 +6,24 @@ state_file: ../.vektor/picker-2026-08-14.yaml
 operation_timeout_ms: 300000
 settle_time_ms: 10000
 allow_degraded: false
+workload:
+  network: host
+  restart_policy: unless-stopped
+  environment:
+    ROS_DOMAIN_ID: "42"
+    ROBOT_MODE: production
+  mounts:
+    - source: /var/lib/vektor/robot-config
+      target: /opt/robot/config
+      read_only: true
+  devices:
+    - host_path: /dev/ttyUSB0
+      container_path: /dev/ttyUSB0
+  command:
+    - ros2
+    - launch
+    - picker_bringup
+    - robot.launch.py
 waves:
   - name: canary
     selectors:

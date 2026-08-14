@@ -20,8 +20,12 @@ public:
     if (on_prepare)
       on_prepare();
   }
-  vektor::RuntimeObservation activate(const std::string &artifact) override {
-    observation = {true, artifact, "test-container", true};
+  vektor::RuntimeObservation
+  activate(const std::string &artifact,
+           const vektor::WorkloadSpec &workload) override {
+    last_workload = workload;
+    observation = {true, artifact, "test-container", true,
+                   vektor::workload_fingerprint(workload)};
     return observation;
   }
   vektor::RuntimeObservation stop() override {
@@ -32,6 +36,7 @@ public:
   int calls{0};
   std::function<void()> on_prepare;
   vektor::RuntimeObservation observation;
+  vektor::WorkloadSpec last_workload;
 };
 
 vektor::StatusSnapshot healthy_snapshot(const std::string &robot_id) {
@@ -99,7 +104,12 @@ void write_configs(const RolloutFiles &files, int first_port, int second_port) {
   rollout << "schema_version: 1\ndeployment_id: release-1\nartifact: "
           << kArtifact << "\nfleet_config: " << files.fleet.string()
           << "\nstate_file: " << files.state.string()
-          << "\noperation_timeout_ms: 1000\nsettle_time_ms: 0\nwaves:\n"
+          << "\noperation_timeout_ms: 1000\nsettle_time_ms: 0\n"
+          << "workload:\n  network: host\n  restart_policy: unless-stopped\n"
+          << "  environment:\n    ROS_DOMAIN_ID: '42'\n"
+          << "  mounts:\n    - source: /tmp\n      target: /data\n"
+          << "      read_only: true\n  command: [sleep, infinity]\n"
+          << "waves:\n"
           << "  - name: canary\n    selectors: [ring=canary]\n"
           << "  - name: stable\n    selectors: [ring=stable]\n";
 }
@@ -132,11 +142,15 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
 
   const auto config = vektor::load_rollout_config(files.rollout.string());
   EXPECT_EQ(config.operation_timeout.count(), 1000);
+  EXPECT_EQ(config.workload.environment.at("ROS_DOMAIN_ID"), "42");
+  ASSERT_EQ(config.workload.mounts.size(), 1U);
+  EXPECT_TRUE(config.workload.mounts.front().read_only);
   const auto deployed = vektor::deploy_release(config);
   EXPECT_TRUE(deployed.success);
   EXPECT_FALSE(deployed.complete);
   EXPECT_EQ(deployed.wave, "canary");
   EXPECT_EQ(first.backend->calls, 1);
+  EXPECT_EQ(first.backend->last_workload, config.workload);
   EXPECT_EQ(second.backend->calls, 0);
   EXPECT_NE(
       vektor::rollout_report_to_json(deployed).find("\"action\":\"deploy\""),
@@ -150,8 +164,10 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   vektor::agent::v1::DeploymentRecord response;
   ASSERT_TRUE(stub->GetDeployment(&context, request, &response).ok());
   EXPECT_EQ(response.phase(), vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE);
-  EXPECT_EQ(response.schema_version(), 2U);
+  EXPECT_EQ(response.schema_version(), 3U);
   EXPECT_EQ(response.observed_artifact(), kArtifact);
+  EXPECT_EQ(response.observed_workload_fingerprint(),
+            vektor::workload_fingerprint(config.workload));
   EXPECT_TRUE(response.runtime_running());
   EXPECT_FALSE(response.drift_detected());
 

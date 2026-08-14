@@ -180,8 +180,11 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
   try {
-    *response = to_proto(deployment_state_->prepare(request->deployment_id(),
-                                                    request->artifact()));
+    const auto workload = request->has_workload()
+                              ? from_proto(request->workload())
+                              : WorkloadSpec{};
+    *response = to_proto(deployment_state_->prepare(
+        request->deployment_id(), request->artifact(), workload));
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
