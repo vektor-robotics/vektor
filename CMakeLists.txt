@@ -75,7 +75,7 @@ ament_target_dependencies(vektor_core
   lifecycle_msgs
 )
 
-add_library(vektor_deployment src/deployment.cpp)
+add_library(vektor_deployment src/deployment.cpp src/runtime.cpp)
 target_include_directories(vektor_deployment PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>

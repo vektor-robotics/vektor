@@ -52,7 +52,8 @@ restricted to loopback or Unix sockets:
 ```bash
 ros2 run vektor vektor agent --config config/talker.yaml \
   --listen 127.0.0.1:50051 --interval-ms 5000 --insecure \
-  --oci-runtime docker --deployment-state .vektor/robot-001-deployment.yaml
+  --oci-runtime docker --runtime-container vektor-workload \
+  --deployment-state .vektor/robot-001-deployment.yaml
 ```
 
 Any non-loopback deployment requires mutual TLS. The server certificate and key
@@ -129,10 +130,11 @@ ros2 run vektor vektor deploy --config config/rollout.example.yaml
 ```
 
 VEKTOR checks the selected robots before deployment, asks each agent to pull the
-artifact with its configured Docker or Podman runtime, marks the artifact as the
-active desired release, waits for the configured settling period, and checks
-health again. A failed prepare, activation, or post-deploy health gate rolls the
-entire wave back automatically.
+artifact with its configured Docker or Podman runtime, replaces the managed
+container with that exact digest, verifies the observed image reference, waits
+for the configured settling period, and checks ROS health again. A failed
+prepare, activation, observation, or post-deploy health gate rolls the entire
+wave back automatically.
 
 A successful non-final wave pauses deliberately. Re-check the active machines
 and advance the next wave with:
@@ -154,9 +156,19 @@ process restart does not silently advance a release. OCI references must use
 `operation_timeout_ms` gives image pulls a separate deadline from the fleet's
 short health-request timeout.
 
-The agent performs the OCI pull and owns the desired-artifact record. A machine
-supervisor can watch that record to reconcile the application runtime while
-VEKTOR remains independent of a specific container launch topology.
+The initial runtime driver manages one container, named `vektor-workload` by
+default, with host networking and `unless-stopped` restart behavior. Override
+the name with `--runtime-container`. VEKTOR labels containers it creates and
+refuses to replace or stop a same-named container without that ownership label.
+Desired and observed artifacts, the runtime container ID, ownership, running
+state, and drift status are persisted atomically and returned by
+`GetDeployment`. The agent rechecks observed state after restart, during health
+inspection, and when deployment state is requested.
+
+This v0.6 foundation intentionally supports a single container without custom
+mounts, environment variables, device mappings, or launch arguments. Those
+workload-spec capabilities and readiness handling remain before v0.6 is
+complete.
 
 ## Repository layout
 
@@ -168,7 +180,8 @@ src/reporter.cpp      Check output and exit semantics
 src/status.cpp        Fleet-ready snapshots and bounded local history
 src/agent.cpp         Periodic inspection, mTLS, and gRPC service
 src/fleet.cpp         Inventory, targeting, concurrent polling, aggregation
-src/deployment.cpp    Agent OCI preparation and desired-release transactions
+src/runtime.cpp       Versioned Docker/Podman runtime-driver implementation
+src/deployment.cpp    Desired/observed state and reconciliation transactions
 src/rollout.cpp       Health-gated waves, promotion, state, and rollback
 proto/                Versioned fleet API contract
 src/main.cpp          CLI entry point
@@ -259,9 +272,11 @@ colcon test-result --verbose
 ## Roadmap
 
 Milestones 1–5 provide checks, status snapshots, the mutually authenticated
-machine agent, fleet aggregation, and health-gated OCI rollouts. The next phase
-focuses on signed artifacts, audit trails, access control, and production soak
-testing. See `ROADMAP.md`.
+machine agent, fleet aggregation, and health-gated OCI rollouts. The current
+focus is v0.6 Reconcile: applying the desired artifact to the actual machine
+runtime, verifying the observed digest and health, detecting drift, and safely
+recovering or rolling back after failures. Artifact trust, audit, access control,
+and production hardening follow in v0.7–v0.9. See `ROADMAP.md`.
 
 ## Contributing and security
 

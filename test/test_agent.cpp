@@ -44,6 +44,13 @@ TEST(AgentOptions, RequiresCompleteMutualTlsConfiguration) {
   EXPECT_NO_THROW(vektor::validate_agent_options(options));
 }
 
+TEST(AgentOptions, RejectsInvalidRuntimeContainerName) {
+  vektor::AgentOptions options;
+  options.insecure = true;
+  options.runtime_container = "invalid name";
+  EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
+}
+
 TEST(AgentStatusState, PublishesAndWaitsForVersionedSnapshots) {
   vektor::AgentStatusState state;
   EXPECT_FALSE(state.latest().has_value());

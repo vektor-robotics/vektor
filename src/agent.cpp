@@ -77,6 +77,8 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("deployment state path cannot be empty");
   if (options.oci_runtime.empty())
     throw std::invalid_argument("OCI runtime cannot be empty");
+  if (!is_valid_runtime_container_name(options.runtime_container))
+    throw std::invalid_argument("invalid runtime container name");
   if (options.insecure) {
     if (!is_loopback_address(options.listen_address))
       throw std::invalid_argument(
@@ -225,7 +227,7 @@ GrpcAgentService::GetDeployment(grpc::ServerContext *,
   if (!deployment_state_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
-  *response = to_proto(deployment_state_->current());
+  *response = to_proto(deployment_state_->refresh_observed());
   return grpc::Status::OK;
 }
 
@@ -252,10 +254,15 @@ AgentRunner::AgentRunner(rclcpp::Node::SharedPtr node, CheckConfig config,
 
 int AgentRunner::run() {
   validate_agent_options(options_);
-  auto artifact_backend =
-      std::make_shared<OciArtifactBackend>(options_.oci_runtime);
+  auto runtime = std::make_shared<OciRuntimeDriver>(options_.oci_runtime,
+                                                    options_.runtime_container);
   AgentDeploymentState deployment_state(options_.deployment_state_path,
-                                        std::move(artifact_backend));
+                                        std::move(runtime));
+  if (deployment_state.current().phase != DeploymentPhase::Idle) {
+    const auto restored = deployment_state.refresh_observed();
+    if (restored.drift_detected)
+      RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
+  }
   GrpcAgentService service(state_, deployment_state);
   grpc::ServerBuilder builder;
   int bound_port = 0;
@@ -303,6 +310,12 @@ int AgentRunner::run() {
         }
       }
       state_.publish(std::move(snapshot));
+
+      if (deployment_state.current().phase != DeploymentPhase::Idle) {
+        const auto deployment = deployment_state.refresh_observed();
+        if (deployment.drift_detected)
+          RCLCPP_ERROR(node_->get_logger(), "%s", deployment.message.c_str());
+      }
 
       const auto next_run = started_at + options_.interval;
       while (!stop.load() && rclcpp::ok() &&
