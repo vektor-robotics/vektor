@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s inherit_errexit
 
 registry="${VEKTOR_TEST_REGISTRY:-registry:5000}"
 output_file="${1:-/tmp/vektor-trust-integration.env}"
@@ -23,6 +24,7 @@ push_artifact() {
   local marker="$3"
   local config_path="${fixture_dir}/${repository//\//_}-${marker}.json"
   local manifest_path="${config_path}.manifest"
+  local headers_path="${config_path}.headers"
 
   printf '{"architecture":"amd64","os":"linux","config":{"Labels":{"org.vektor.fixture":"%s"}},"rootfs":{"type":"layers","diff_ids":[]}}' \
     "${marker}" >"${config_path}"
@@ -30,11 +32,27 @@ push_artifact() {
   local config_size
   config_size="$(wc -c <"${config_path}" | tr -d ' ')"
 
-  curl --fail --silent --show-error -X POST \
+  curl --fail --silent --show-error -X POST -D "${headers_path}" \
+    "http://${registry}/v2/${repository}/blobs/uploads/" >/dev/null
+  local upload_url
+  upload_url="$(awk 'BEGIN { IGNORECASE=1 } /^location:/ {
+    sub(/\r$/, "", $2); print $2
+  }' "${headers_path}")"
+  if [[ -z "${upload_url}" ]]; then
+    echo "OCI registry did not return a blob upload location" >&2
+    return 1
+  fi
+  if [[ "${upload_url}" == /* ]]; then
+    upload_url="http://${registry}${upload_url}"
+  fi
+  local separator='?'
+  if [[ "${upload_url}" == *\?* ]]; then
+    separator='&'
+  fi
+  curl --fail --silent --show-error -X PUT \
     -H 'Content-Type: application/octet-stream' \
     --data-binary "@${config_path}" \
-    "http://${registry}/v2/${repository}/blobs/uploads/?digest=${config_digest}" \
-    >/dev/null
+    "${upload_url}${separator}digest=${config_digest}" >/dev/null
 
   printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":"%s","size":%s},"layers":[]}' \
     "${config_digest}" "${config_size}" >"${manifest_path}"
@@ -55,10 +73,16 @@ tampered_original="$(push_artifact vektor/tampered latest original)"
 export COSIGN_PASSWORD='vektor-integration-test'
 cosign generate-key-pair --output-key-prefix="${fixture_dir}/trusted" >/dev/null
 cosign generate-key-pair --output-key-prefix="${fixture_dir}/untrusted" >/dev/null
+cosign signing-config create \
+  --output-file="${fixture_dir}/signing-config.json" >/dev/null
 cosign sign --yes --key "${fixture_dir}/trusted.key" \
-  --allow-http-registry --tlog-upload=false "${signed_digest}" >/dev/null
+  --allow-http-registry \
+  --signing-config="${fixture_dir}/signing-config.json" \
+  "${signed_digest}" >/dev/null
 cosign sign --yes --key "${fixture_dir}/trusted.key" \
-  --allow-http-registry --tlog-upload=false "${tampered_original}" >/dev/null
+  --allow-http-registry \
+  --signing-config="${fixture_dir}/signing-config.json" \
+  "${tampered_original}" >/dev/null
 
 # Move the signed tag to different content. Verification of the tag must now fail.
 push_artifact vektor/tampered latest replacement >/dev/null
