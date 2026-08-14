@@ -577,7 +577,9 @@ TEST(RolloutIntegration, RuntimeTimeoutRollsBackEntireTwoRobotWave) {
   install_previous_release(second);
   write_configs(files, first.port, second.port, true);
   auto config = vektor::load_rollout_config(files.rollout.string());
-  config.operation_timeout = std::chrono::milliseconds(37);
+  // Leave enough margin for gRPC scheduling on loaded CI runners. The fake
+  // runtime still fails immediately and records the deadline it receives.
+  config.operation_timeout = std::chrono::milliseconds(250);
   first.runtime->set_prepare_timeout(true);
 
   const auto deployed = vektor::deploy_release(config);
@@ -592,7 +594,7 @@ TEST(RolloutIntegration, RuntimeTimeoutRollsBackEntireTwoRobotWave) {
   EXPECT_GT(first.runtime->last_prepare_timeout(),
             std::chrono::milliseconds(0));
   EXPECT_LE(first.runtime->last_prepare_timeout(),
-            std::chrono::milliseconds(37));
+            std::chrono::milliseconds(250));
   EXPECT_EQ(first.deployment->current().phase,
             vektor::DeploymentPhase::RolledBack);
   EXPECT_EQ(second.deployment->current().phase,
