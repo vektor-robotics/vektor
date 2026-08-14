@@ -14,6 +14,8 @@ struct TrustPolicy {
   std::string key;
   std::string certificate_identity;
   std::string certificate_oidc_issuer;
+  bool allow_http_registry{false};
+  bool ignore_transparency_log{false};
   std::chrono::milliseconds timeout{30000};
 };
 

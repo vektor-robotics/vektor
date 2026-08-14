@@ -74,6 +74,8 @@ void reject_unknown(const YAML::Node &root) {
                                       "key",
                                       "certificate_identity",
                                       "certificate_oidc_issuer",
+                                      "allow_http_registry",
+                                      "ignore_transparency_log",
                                       "timeout_ms"};
   if (!root || !root.IsMap())
     throw std::runtime_error("trust policy must be a mapping");
@@ -230,6 +232,17 @@ TrustPolicy load_trust_policy(const std::filesystem::path &path) {
       policy.cosign_executable =
           require_string(root["cosign_executable"], "cosign_executable");
     validate_executable(policy.cosign_executable);
+    policy.allow_http_registry = root["allow_http_registry"]
+                                     ? root["allow_http_registry"].as<bool>()
+                                     : false;
+    policy.ignore_transparency_log =
+        root["ignore_transparency_log"]
+            ? root["ignore_transparency_log"].as<bool>()
+            : false;
+    if (policy.mode == TrustMode::Keyless &&
+        (policy.allow_http_registry || policy.ignore_transparency_log))
+      throw std::runtime_error(
+          "keyless policy cannot weaken registry or transparency-log checks");
     const auto timeout =
         root["timeout_ms"] ? root["timeout_ms"].as<long long>() : 30000;
     if (timeout <= 0 || timeout > 24LL * 60 * 60 * 1000)
@@ -246,6 +259,10 @@ TrustPolicy load_trust_policy(const std::filesystem::path &path) {
 CosignArtifactVerifier::CosignArtifactVerifier(TrustPolicy policy)
     : policy_(std::move(policy)) {
   validate_executable(policy_.cosign_executable);
+  if (policy_.mode == TrustMode::Keyless &&
+      (policy_.allow_http_registry || policy_.ignore_transparency_log))
+    throw std::invalid_argument("keyless verification cannot weaken registry "
+                                "or transparency-log checks");
 }
 
 ArtifactVerification
@@ -268,6 +285,10 @@ CosignArtifactVerifier::verify(const std::string &artifact,
     verification.signer = policy_.certificate_identity;
     verification.issuer = policy_.certificate_oidc_issuer;
   }
+  if (policy_.allow_http_registry)
+    arguments.push_back("--allow-http-registry");
+  if (policy_.ignore_transparency_log)
+    arguments.push_back("--insecure-ignore-tlog");
   arguments.push_back(artifact);
   const auto result =
       run_process(policy_.cosign_executable, arguments, timeout);

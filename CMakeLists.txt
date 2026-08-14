@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(vektor)
 
+option(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS
+  "Run real Cosign tests against a prepared OCI registry" OFF)
+
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 20)
 endif()
@@ -183,6 +186,11 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_trust test/test_trust.cpp)
   target_link_libraries(test_trust vektor_deployment)
+
+  if(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS)
+    ament_add_gtest(test_trust_integration test/test_trust_integration.cpp)
+    target_link_libraries(test_trust_integration vektor_deployment)
+  endif()
 
   ament_add_gtest(test_audit test/test_audit.cpp)
   target_link_libraries(test_audit vektor_deployment yaml-cpp Threads::Threads)

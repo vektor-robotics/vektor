@@ -33,6 +33,10 @@ All notable changes to VEKTOR are documented here.
   artifact verification, runtime preparation, drift, and restart recovery.
 - Fail-closed audit persistence that prevents runtime mutation when the agent
   cannot durably record the initiating event.
+- Real Cosign and OCI-registry integration coverage for trusted signed,
+  unsigned, wrong-key, and post-signing tag-tampering cases.
+- Explicit, secure-by-default public-key policy controls for isolated HTTP
+  registries and signatures intentionally excluded from a transparency log.
 
 ## [0.5.0] - 2026-08-14
 
