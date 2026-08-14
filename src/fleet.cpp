@@ -282,6 +282,16 @@ FleetConfig load_fleet_config(const std::string &path) {
   return config;
 }
 
+std::shared_ptr<grpc::Channel>
+make_fleet_channel(const FleetRobotConfig &robot,
+                   const FleetTransportConfig &transport) {
+  grpc::ChannelArguments arguments;
+  if (!robot.tls_server_name.empty())
+    arguments.SetSslTargetNameOverride(robot.tls_server_name);
+  return grpc::CreateCustomChannel(robot.endpoint,
+                                   channel_credentials(transport), arguments);
+}
+
 LabelSelector parse_label_selector(const std::string &value) {
   const auto separator = value.find('=');
   if (separator == std::string::npos || separator == 0 ||

@@ -1,0 +1,16 @@
+schema_version: 1
+deployment_id: picker-2026-08-14
+artifact: ghcr.io/vektor-robotics/picker@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+fleet_config: fleet.example.yaml
+state_file: ../.vektor/picker-2026-08-14.yaml
+operation_timeout_ms: 300000
+settle_time_ms: 10000
+allow_degraded: false
+waves:
+  - name: canary
+    selectors:
+      - ring=canary
+    limit: 1
+  - name: stable
+    selectors:
+      - ring=stable

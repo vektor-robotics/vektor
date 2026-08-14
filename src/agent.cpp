@@ -73,6 +73,10 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("agent listen address cannot be empty");
   if (options.interval.count() <= 0)
     throw std::invalid_argument("agent interval must be greater than zero");
+  if (options.deployment_state_path.empty())
+    throw std::invalid_argument("deployment state path cannot be empty");
+  if (options.oci_runtime.empty())
+    throw std::invalid_argument("OCI runtime cannot be empty");
   if (options.insecure) {
     if (!is_loopback_address(options.listen_address))
       throw std::invalid_argument(
@@ -150,6 +154,10 @@ vektor::agent::v1::StatusSnapshot to_proto(const VersionedSnapshot &versioned) {
 GrpcAgentService::GrpcAgentService(const AgentStatusState &state)
     : state_(state) {}
 
+GrpcAgentService::GrpcAgentService(const AgentStatusState &state,
+                                   AgentDeploymentState &deployment_state)
+    : state_(state), deployment_state_(&deployment_state) {}
+
 grpc::Status
 GrpcAgentService::GetStatus(grpc::ServerContext *,
                             const vektor::agent::v1::GetStatusRequest *,
@@ -159,6 +167,65 @@ GrpcAgentService::GetStatus(grpc::ServerContext *,
     return {grpc::StatusCode::UNAVAILABLE,
             "the first health inspection has not completed"};
   *response = to_proto(*latest);
+  return grpc::Status::OK;
+}
+
+grpc::Status GrpcAgentService::PrepareDeployment(
+    grpc::ServerContext *,
+    const vektor::agent::v1::PrepareDeploymentRequest *request,
+    vektor::agent::v1::DeploymentRecord *response) {
+  if (!deployment_state_)
+    return {grpc::StatusCode::UNIMPLEMENTED,
+            "deployment support is not configured"};
+  try {
+    *response = to_proto(deployment_state_->prepare(request->deployment_id(),
+                                                    request->artifact()));
+    return grpc::Status::OK;
+  } catch (const std::invalid_argument &error) {
+    return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
+  } catch (const std::exception &error) {
+    return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
+  }
+}
+
+grpc::Status GrpcAgentService::ActivateDeployment(
+    grpc::ServerContext *,
+    const vektor::agent::v1::ActivateDeploymentRequest *request,
+    vektor::agent::v1::DeploymentRecord *response) {
+  if (!deployment_state_)
+    return {grpc::StatusCode::UNIMPLEMENTED,
+            "deployment support is not configured"};
+  try {
+    *response = to_proto(deployment_state_->activate(request->deployment_id()));
+    return grpc::Status::OK;
+  } catch (const std::exception &error) {
+    return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
+  }
+}
+
+grpc::Status GrpcAgentService::RollbackDeployment(
+    grpc::ServerContext *,
+    const vektor::agent::v1::RollbackDeploymentRequest *request,
+    vektor::agent::v1::DeploymentRecord *response) {
+  if (!deployment_state_)
+    return {grpc::StatusCode::UNIMPLEMENTED,
+            "deployment support is not configured"};
+  try {
+    *response = to_proto(deployment_state_->rollback(request->deployment_id()));
+    return grpc::Status::OK;
+  } catch (const std::exception &error) {
+    return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
+  }
+}
+
+grpc::Status
+GrpcAgentService::GetDeployment(grpc::ServerContext *,
+                                const vektor::agent::v1::GetDeploymentRequest *,
+                                vektor::agent::v1::DeploymentRecord *response) {
+  if (!deployment_state_)
+    return {grpc::StatusCode::UNIMPLEMENTED,
+            "deployment support is not configured"};
+  *response = to_proto(deployment_state_->current());
   return grpc::Status::OK;
 }
 
@@ -185,7 +252,11 @@ AgentRunner::AgentRunner(rclcpp::Node::SharedPtr node, CheckConfig config,
 
 int AgentRunner::run() {
   validate_agent_options(options_);
-  GrpcAgentService service(state_);
+  auto artifact_backend =
+      std::make_shared<OciArtifactBackend>(options_.oci_runtime);
+  AgentDeploymentState deployment_state(options_.deployment_state_path,
+                                        std::move(artifact_backend));
+  GrpcAgentService service(state_, deployment_state);
   grpc::ServerBuilder builder;
   int bound_port = 0;
   builder.AddListeningPort(options_.listen_address,

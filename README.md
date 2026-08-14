@@ -4,9 +4,9 @@ Safe software delivery for autonomous machines.
 
 VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets.
 `vektor check` validates a live ROS graph, `vektor status` produces a
-timestamped machine-health snapshot, `vektor agent` serves continuously updated
-snapshots over gRPC, and `vektor fleet` aggregates health across selected
-machines.
+timestamped machine-health snapshot, `vektor agent` serves health and deployment
+operations over gRPC, `vektor fleet` aggregates selected machines, and the
+deployment commands run health-gated OCI rollouts.
 
 ## Milestone 1 checks
 
@@ -51,7 +51,8 @@ restricted to loopback or Unix sockets:
 
 ```bash
 ros2 run vektor vektor agent --config config/talker.yaml \
-  --listen 127.0.0.1:50051 --interval-ms 5000 --insecure
+  --listen 127.0.0.1:50051 --interval-ms 5000 --insecure \
+  --oci-runtime docker --deployment-state .vektor/robot-001-deployment.yaml
 ```
 
 Any non-loopback deployment requires mutual TLS. The server certificate and key
@@ -116,6 +117,47 @@ Relative certificate paths resolve from the inventory file. Optional
 `tls_server_name` on a robot supports certificate identities that differ from
 the endpoint hostname.
 
+## Health-gated deployments
+
+A rollout file binds one digest-pinned OCI artifact to a fleet inventory and a
+sequence of non-overlapping waves. See `config/rollout.example.yaml`.
+
+Start the canary wave:
+
+```bash
+ros2 run vektor vektor deploy --config config/rollout.example.yaml
+```
+
+VEKTOR checks the selected robots before deployment, asks each agent to pull the
+artifact with its configured Docker or Podman runtime, marks the artifact as the
+active desired release, waits for the configured settling period, and checks
+health again. A failed prepare, activation, or post-deploy health gate rolls the
+entire wave back automatically.
+
+A successful non-final wave pauses deliberately. Re-check the active machines
+and advance the next wave with:
+
+```bash
+ros2 run vektor vektor promote --config config/rollout.example.yaml
+```
+
+Rollback every applied wave in reverse robot order:
+
+```bash
+ros2 run vektor vektor rollback --config config/rollout.example.yaml
+```
+
+Add `--format json` to any rollout command for automation. Operator rollout
+progress and each agent's desired deployment are persisted atomically, so a
+process restart does not silently advance a release. OCI references must use
+`name@sha256:<64-hex-digest>`; mutable tags such as `latest` are rejected.
+`operation_timeout_ms` gives image pulls a separate deadline from the fleet's
+short health-request timeout.
+
+The agent performs the OCI pull and owns the desired-artifact record. A machine
+supervisor can watch that record to reconcile the application runtime while
+VEKTOR remains independent of a specific container launch topology.
+
 ## Repository layout
 
 ```text
@@ -126,10 +168,13 @@ src/reporter.cpp      Check output and exit semantics
 src/status.cpp        Fleet-ready snapshots and bounded local history
 src/agent.cpp         Periodic inspection, mTLS, and gRPC service
 src/fleet.cpp         Inventory, targeting, concurrent polling, aggregation
+src/deployment.cpp    Agent OCI preparation and desired-release transactions
+src/rollout.cpp       Health-gated waves, promotion, state, and rollback
 proto/                Versioned fleet API contract
 src/main.cpp          CLI entry point
 config/example.yaml   Example health policy
 config/fleet.example.yaml  Example fleet inventory
+config/rollout.example.yaml  Example staged OCI rollout
 test/                 GoogleTest coverage
 ```
 
@@ -213,9 +258,10 @@ colcon test-result --verbose
 
 ## Roadmap
 
-Milestones 1–4 provide checks, status snapshots, the mutually authenticated
-machine agent, and fleet aggregation. The next milestone adds progressive OCI
-deployment, promotion, pause, and rollback. See `ROADMAP.md`.
+Milestones 1–5 provide checks, status snapshots, the mutually authenticated
+machine agent, fleet aggregation, and health-gated OCI rollouts. The next phase
+focuses on signed artifacts, audit trails, access control, and production soak
+testing. See `ROADMAP.md`.
 
 ## Contributing and security
 

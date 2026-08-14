@@ -3,6 +3,8 @@
 #include "vektor/agent/v1/agent.grpc.pb.h"
 #include "vektor/status.hpp"
 
+#include <grpcpp/channel.h>
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -57,6 +59,9 @@ struct FleetReport {
 };
 
 FleetConfig load_fleet_config(const std::string &path);
+std::shared_ptr<grpc::Channel>
+make_fleet_channel(const FleetRobotConfig &robot,
+                   const FleetTransportConfig &transport);
 LabelSelector parse_label_selector(const std::string &value);
 std::vector<FleetRobotConfig>
 select_fleet_robots(const FleetConfig &config,

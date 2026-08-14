@@ -35,6 +35,13 @@ Fleet inventory, labels, health aggregation, and staged target selection.
 OCI artifact delivery, health-gated rollout waves, promotion, pause, and automatic
 rollback.
 
+- Digest-pinned OCI pulls through a configured Docker or Podman runtime
+- Restart-safe agent deployment records and versioned deployment RPCs
+- Deterministic, non-overlapping rollout waves
+- Explicit promotion between healthy waves
+- Automatic rollback on preparation, activation, or health-gate failure
+- Operator-triggered fleet rollback in reverse application order
+
 ## v1.0 — Production readiness
 
 Signed artifacts, policy audit trails, role-based access, long-running soak tests,

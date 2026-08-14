@@ -41,7 +41,41 @@ message GetStatusRequest {}
 
 message WatchStatusRequest {}
 
+enum DeploymentPhase {
+  DEPLOYMENT_PHASE_UNSPECIFIED = 0;
+  DEPLOYMENT_PHASE_IDLE = 1;
+  DEPLOYMENT_PHASE_STAGED = 2;
+  DEPLOYMENT_PHASE_ACTIVE = 3;
+  DEPLOYMENT_PHASE_ROLLED_BACK = 4;
+  DEPLOYMENT_PHASE_FAILED = 5;
+}
+
+message DeploymentRecord {
+  uint32 schema_version = 1;
+  string deployment_id = 2;
+  string artifact = 3;
+  string previous_artifact = 4;
+  DeploymentPhase phase = 5;
+  string message = 6;
+  string updated_at = 7;
+}
+
+message PrepareDeploymentRequest {
+  string deployment_id = 1;
+  string artifact = 2;
+}
+
+message ActivateDeploymentRequest { string deployment_id = 1; }
+
+message RollbackDeploymentRequest { string deployment_id = 1; }
+
+message GetDeploymentRequest {}
+
 service Agent {
   rpc GetStatus(GetStatusRequest) returns (StatusSnapshot);
   rpc WatchStatus(WatchStatusRequest) returns (stream StatusSnapshot);
+  rpc PrepareDeployment(PrepareDeploymentRequest) returns (DeploymentRecord);
+  rpc ActivateDeployment(ActivateDeploymentRequest) returns (DeploymentRecord);
+  rpc RollbackDeployment(RollbackDeploymentRequest) returns (DeploymentRecord);
+  rpc GetDeployment(GetDeploymentRequest) returns (DeploymentRecord);
 }
