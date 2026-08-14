@@ -2,12 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <future>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 constexpr auto kArtifact =
@@ -85,6 +87,21 @@ public:
   std::string last_artifact;
   std::chrono::milliseconds last_timeout{0};
   std::function<void()> on_verify;
+};
+
+class RecordingAuditSink final : public vektor::AuditSink {
+public:
+  void append(const vektor::AuditEvent &event) override {
+    events.push_back(event);
+  }
+  std::vector<vektor::AuditEvent> events;
+};
+
+class FailingAuditSink final : public vektor::AuditSink {
+public:
+  void append(const vektor::AuditEvent &) override {
+    throw std::runtime_error("audit storage unavailable");
+  }
 };
 } // namespace
 
@@ -181,6 +198,76 @@ TEST(Deployment, RejectsUntrustedArtifactBeforeRuntimePull) {
             std::string::npos);
   EXPECT_EQ(state.current().operation, vektor::ReconciliationOperation::None);
   std::filesystem::remove(path);
+}
+
+TEST(Deployment, AttributesOperatorAndAgentAuditEvents) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_audited.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  auto verifier = std::make_shared<FakeVerifier>();
+  auto audit = std::make_shared<RecordingAuditSink>();
+  vektor::AgentDeploymentState state(path, runtime, verifier, audit);
+
+  state.prepare("release-1", kArtifact, {}, std::chrono::minutes(5),
+                "mtls:operator@example.com");
+  state.activate("release-1", std::chrono::minutes(5),
+                 std::chrono::seconds(30), "mtls:operator@example.com");
+
+  ASSERT_GE(audit->events.size(), 7U);
+  EXPECT_EQ(audit->events.front().actor, "mtls:operator@example.com");
+  EXPECT_EQ(audit->events.front().action, "deployment.prepare");
+  EXPECT_EQ(audit->events.front().outcome, "started");
+  EXPECT_EQ(audit->events.front().deployment_id, "release-1");
+  EXPECT_EQ(audit->events.front().artifact, kArtifact);
+  EXPECT_TRUE(std::any_of(
+      audit->events.begin(), audit->events.end(), [](const auto &event) {
+        return event.actor == "agent" && event.action == "artifact.verify" &&
+               event.outcome == "succeeded";
+      }));
+  EXPECT_EQ(audit->events.back().actor, "mtls:operator@example.com");
+  EXPECT_EQ(audit->events.back().action, "deployment.activate");
+  EXPECT_EQ(audit->events.back().outcome, "succeeded");
+  std::filesystem::remove(path);
+}
+
+TEST(Deployment, AuditsRejectedArtifactAndNeverCallsRuntime) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_audit_rejected.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  auto verifier = std::make_shared<FakeVerifier>();
+  verifier->fail = true;
+  auto audit = std::make_shared<RecordingAuditSink>();
+  vektor::AgentDeploymentState state(path, runtime, verifier, audit);
+
+  EXPECT_THROW(state.prepare("release-1", kArtifact, {},
+                             std::chrono::minutes(5), "mtls:release-manager"),
+               std::runtime_error);
+  EXPECT_EQ(runtime->calls, 0);
+  ASSERT_FALSE(audit->events.empty());
+  const auto &failed = audit->events.back();
+  EXPECT_EQ(failed.actor, "agent");
+  EXPECT_EQ(failed.action, "artifact.verify");
+  EXPECT_EQ(failed.outcome, "failed");
+  EXPECT_NE(failed.message.find("signature is not trusted"), std::string::npos);
+  std::filesystem::remove(path);
+}
+
+TEST(Deployment, BlocksRuntimeMutationWhenAuditCannotAppend) {
+  const auto path =
+      std::filesystem::path("vektor_test_deployment_audit_failure.yaml");
+  std::filesystem::remove(path);
+  auto runtime = std::make_shared<FakeRuntime>();
+  auto audit = std::make_shared<FailingAuditSink>();
+  vektor::AgentDeploymentState state(path, runtime, nullptr, audit);
+
+  EXPECT_THROW(state.prepare("release-1", kArtifact), std::runtime_error);
+  EXPECT_EQ(runtime->calls, 0);
+  EXPECT_EQ(state.current().phase, vektor::DeploymentPhase::Idle);
+  EXPECT_EQ(state.current().operation,
+            vektor::ReconciliationOperation::None);
+  EXPECT_FALSE(std::filesystem::exists(path));
 }
 
 TEST(Deployment, ExposesPersistedVerificationProgress) {

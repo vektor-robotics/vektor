@@ -1,5 +1,6 @@
 #pragma once
 
+#include "vektor/audit.hpp"
 #include "vektor/agent/v1/agent.grpc.pb.h"
 #include "vektor/runtime.hpp"
 #include "vektor/trust.hpp"
@@ -56,23 +57,28 @@ class AgentDeploymentState {
 public:
   AgentDeploymentState(std::filesystem::path state_path,
                        std::shared_ptr<RuntimeDriver> runtime,
-                       std::shared_ptr<ArtifactVerifier> verifier = nullptr);
+                       std::shared_ptr<ArtifactVerifier> verifier = nullptr,
+                       std::shared_ptr<AuditSink> audit = nullptr);
 
   DeploymentRecord prepare(
       const std::string &deployment_id, const std::string &artifact,
       WorkloadSpec workload = {},
-      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5));
+      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
+      const std::string &actor = "agent");
   DeploymentRecord activate(
       const std::string &deployment_id,
       std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
-      std::chrono::milliseconds readiness_timeout = std::chrono::seconds(30));
+      std::chrono::milliseconds readiness_timeout = std::chrono::seconds(30),
+      const std::string &actor = "agent");
   DeploymentRecord rollback(
       const std::string &deployment_id,
-      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5));
+      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
+      const std::string &actor = "agent");
   DeploymentRecord refresh_observed(
       std::chrono::milliseconds operation_timeout = std::chrono::seconds(30));
   DeploymentRecord fail_activation(const std::string &deployment_id,
-                                   const std::string &message);
+                                   const std::string &message,
+                                   const std::string &actor = "agent");
   DeploymentRecord current() const;
 
 private:
@@ -85,9 +91,13 @@ private:
   void complete_operation_locked();
   void recover_interrupted_locked(std::chrono::milliseconds operation_timeout);
   void record_failure_locked(const std::string &message);
+  void audit_locked(const std::string &actor, const std::string &action,
+                    const std::string &outcome,
+                    const std::string &message = {}) const;
 
   std::shared_ptr<RuntimeDriver> runtime_;
   std::shared_ptr<ArtifactVerifier> verifier_;
+  std::shared_ptr<AuditSink> audit_;
   mutable std::mutex mutex_;
   bool operation_in_progress_{false};
   DeploymentRecord record_;

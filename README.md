@@ -6,7 +6,7 @@ VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets.
 `vektor check` validates a live ROS graph, `vektor status` produces a
 timestamped machine-health snapshot, `vektor agent` serves health and deployment
 operations over gRPC, `vektor fleet` aggregates selected machines, and the
-deployment commands run health-gated OCI rollouts.
+deployment commands run health-gated OCI rollouts with durable audit events.
 
 ## Milestone 1 checks
 
@@ -54,6 +54,7 @@ ros2 run vektor vektor agent --config config/talker.yaml \
   --listen 127.0.0.1:50051 --interval-ms 5000 --insecure \
   --oci-runtime docker --runtime-container vektor-workload \
   --deployment-state .vektor/robot-001-deployment.yaml \
+  --audit-log .vektor/robot-001-audit.jsonl \
   --trust-policy config/trust.example.yaml
 ```
 
@@ -222,6 +223,33 @@ mismatch, or invalid signature fails preparation before the container runtime
 is called. Successful status records expose the verification method, signer,
 issuer, and timestamp through deployment API schema v5.
 
+### Deployment audit log
+
+Every agent writes append-only JSON Lines audit records to
+`.vektor/audit.jsonl` by default. Set a machine-specific destination with
+`--audit-log <path>`. VEKTOR opens the file in append-only mode, creates it with
+owner-only permissions, writes one complete JSON object per event, and syncs
+each record to durable storage. It never truncates or rewrites existing audit
+records.
+
+Events distinguish operator actions such as `deployment.prepare`,
+`deployment.activate`, and `deployment.rollback` from agent decisions such as
+`artifact.verify`, `runtime.prepare`, `runtime.drift`, and
+`deployment.recover`. Each record includes schema version, UTC timestamp,
+actor, action, outcome, deployment ID, artifact, phase, reconciliation
+operation, and message. With mutual TLS, the actor is the authenticated client
+certificate identity. Loopback development clients are explicitly recorded as
+`unauthenticated:<peer>`.
+
+```json
+{"schema_version":1,"timestamp":"2026-08-15T00:00:00Z","actor":"mtls:release-manager","action":"deployment.prepare","outcome":"started","deployment_id":"release-42","artifact":"ghcr.io/example/robot@sha256:...","phase":"active","operation":"none","message":""}
+```
+
+An audit append failure prevents a new runtime mutation from starting. Ship or
+rotate the JSONL file using host-level tooling appropriate for the deployment;
+VEKTOR reopens the configured path for every event, so renaming a rotated file
+does not require an agent restart.
+
 ## Repository layout
 
 ```text
@@ -231,6 +259,7 @@ src/health_inspector  ROS 2 graph, frequency, TF, lifecycle checks
 src/reporter.cpp      Check output and exit semantics
 src/status.cpp        Fleet-ready snapshots and bounded local history
 src/agent.cpp         Periodic inspection, mTLS, and gRPC service
+src/audit.cpp         Durable append-only deployment event records
 src/fleet.cpp         Inventory, targeting, concurrent polling, aggregation
 src/runtime.cpp       Versioned Docker/Podman runtime-driver implementation
 src/deployment.cpp    Desired/observed state and reconciliation transactions

@@ -248,9 +248,9 @@ bool is_pinned_oci_artifact(const std::string &artifact) {
 
 AgentDeploymentState::AgentDeploymentState(
     std::filesystem::path state_path, std::shared_ptr<RuntimeDriver> runtime,
-    std::shared_ptr<ArtifactVerifier> verifier)
+    std::shared_ptr<ArtifactVerifier> verifier, std::shared_ptr<AuditSink> audit)
     : state_path_(std::move(state_path)), runtime_(std::move(runtime)),
-      verifier_(std::move(verifier)) {
+      verifier_(std::move(verifier)), audit_(std::move(audit)) {
   if (state_path_.empty())
     throw std::invalid_argument("deployment state path cannot be empty");
   if (!runtime_)
@@ -260,6 +260,8 @@ AgentDeploymentState::AgentDeploymentState(
   if (verifier_ && verifier_->interface_version() != 1)
     throw std::invalid_argument(
         "unsupported artifact verifier interface version");
+  if (audit_ && audit_->interface_version() != 1)
+    throw std::invalid_argument("unsupported audit sink interface version");
   load();
 }
 
@@ -371,7 +373,8 @@ void AgentDeploymentState::persist_locked() const {
 
 DeploymentRecord AgentDeploymentState::prepare(
     const std::string &deployment_id, const std::string &artifact,
-    WorkloadSpec workload, std::chrono::milliseconds operation_timeout) {
+    WorkloadSpec workload, std::chrono::milliseconds operation_timeout,
+    const std::string &actor) {
   if (!is_valid_deployment_id(deployment_id))
     throw std::invalid_argument("invalid deployment ID");
   if (!is_pinned_oci_artifact(artifact))
@@ -383,8 +386,11 @@ DeploymentRecord AgentDeploymentState::prepare(
       record_.workload == workload &&
       (record_.phase == DeploymentPhase::Staged ||
        record_.phase == DeploymentPhase::Active) &&
-      (!verifier_ || record_.verification.verified))
+      (!verifier_ || record_.verification.verified)) {
+    audit_locked(actor, "deployment.prepare", "unchanged",
+                 "deployment already prepared");
     return record_;
+  }
   if (record_.phase == DeploymentPhase::Staged)
     throw std::runtime_error("another deployment is already staged");
   if (record_.operation != ReconciliationOperation::None ||
@@ -400,6 +406,7 @@ DeploymentRecord AgentDeploymentState::prepare(
   const auto previous_verification = current_is_rollback_target
                                          ? record_.verification
                                          : record_.previous_verification;
+  const auto original_record = record_;
   record_.deployment_id = deployment_id;
   record_.artifact = artifact;
   record_.previous_artifact = previous;
@@ -407,6 +414,12 @@ DeploymentRecord AgentDeploymentState::prepare(
   record_.previous_workload = previous_workload;
   record_.verification = {};
   record_.previous_verification = previous_verification;
+  try {
+    audit_locked(actor, "deployment.prepare", "started");
+  } catch (...) {
+    record_ = original_record;
+    throw;
+  }
   const auto deadline = std::chrono::steady_clock::now() + operation_timeout;
   const auto remaining = [&] {
     const auto now = std::chrono::steady_clock::now();
@@ -418,6 +431,7 @@ DeploymentRecord AgentDeploymentState::prepare(
   };
   if (verifier_) {
     record_.message = "verifying artifact trust policy";
+    audit_locked("agent", "artifact.verify", "started");
     begin_operation_locked(ReconciliationOperation::Verifying);
     persist_locked();
     try {
@@ -428,16 +442,20 @@ DeploymentRecord AgentDeploymentState::prepare(
         throw std::runtime_error("verifier returned an unverified result");
       record_.verification = verification;
       complete_operation_locked();
+      persist_locked();
+      audit_locked("agent", "artifact.verify", "succeeded");
     } catch (const std::exception &error) {
       if (!lock.owns_lock())
         lock.lock();
       record_failure_locked(std::string("artifact verification failed: ") +
                             error.what());
       persist_locked();
+      audit_locked("agent", "artifact.verify", "failed", record_.message);
       throw;
     }
   }
   record_.message = "preparing artifact";
+  audit_locked("agent", "runtime.prepare", "started");
   begin_operation_locked(ReconciliationOperation::Preparing);
   persist_locked();
   try {
@@ -449,6 +467,7 @@ DeploymentRecord AgentDeploymentState::prepare(
       lock.lock();
     record_failure_locked(error.what());
     persist_locked();
+    audit_locked("agent", "runtime.prepare", "failed", record_.message);
     throw;
   }
   record_.phase = DeploymentPhase::Staged;
@@ -457,20 +476,23 @@ DeploymentRecord AgentDeploymentState::prepare(
   record_.drift_detected = false;
   complete_operation_locked();
   persist_locked();
+  audit_locked(actor, "deployment.prepare", "succeeded", record_.message);
   return record_;
 }
 
 DeploymentRecord
 AgentDeploymentState::activate(const std::string &deployment_id,
                                std::chrono::milliseconds operation_timeout,
-                               std::chrono::milliseconds readiness_timeout) {
+                               std::chrono::milliseconds readiness_timeout,
+                               const std::string &actor) {
   std::unique_lock lock(mutex_);
   if (record_.deployment_id != deployment_id ||
       (record_.phase != DeploymentPhase::Staged &&
        record_.phase != DeploymentPhase::Active))
     throw std::runtime_error("deployment is not staged");
-  begin_operation_locked(ReconciliationOperation::Activating);
   record_.message = "activating desired workload";
+  audit_locked(actor, "deployment.activate", "started");
+  begin_operation_locked(ReconciliationOperation::Activating);
   persist_locked();
   const auto artifact = record_.artifact;
   const auto workload = record_.workload;
@@ -489,19 +511,22 @@ AgentDeploymentState::activate(const std::string &deployment_id,
     record_.updated_at = utc_timestamp();
     complete_operation_locked();
     persist_locked();
+    audit_locked(actor, "deployment.activate", "succeeded", record_.message);
     return record_;
   } catch (const std::exception &error) {
     if (!lock.owns_lock())
       lock.lock();
     record_failure_locked(std::string("activation failed: ") + error.what());
     persist_locked();
+    audit_locked(actor, "deployment.activate", "failed", record_.message);
     throw;
   }
 }
 
 DeploymentRecord
 AgentDeploymentState::rollback(const std::string &deployment_id,
-                               std::chrono::milliseconds operation_timeout) {
+                               std::chrono::milliseconds operation_timeout,
+                               const std::string &actor) {
   std::unique_lock lock(mutex_);
   if (record_.deployment_id != deployment_id ||
       (record_.phase != DeploymentPhase::Staged &&
@@ -514,11 +539,18 @@ AgentDeploymentState::rollback(const std::string &deployment_id,
     throw std::runtime_error("another reconciliation operation is in progress");
   const auto target = record_.previous_artifact;
   const auto target_workload = record_.previous_workload;
+  const auto original_record = record_;
   record_.artifact = target;
   record_.workload = target_workload;
   record_.verification = record_.previous_verification;
-  begin_operation_locked(ReconciliationOperation::RollingBack);
   record_.message = "reconciling rollback target";
+  try {
+    audit_locked(actor, "deployment.rollback", "started");
+  } catch (...) {
+    record_ = original_record;
+    throw;
+  }
+  begin_operation_locked(ReconciliationOperation::RollingBack);
   persist_locked();
   try {
     lock.unlock();
@@ -540,12 +572,14 @@ AgentDeploymentState::rollback(const std::string &deployment_id,
     record_.updated_at = utc_timestamp();
     complete_operation_locked();
     persist_locked();
+    audit_locked(actor, "deployment.rollback", "succeeded", record_.message);
     return record_;
   } catch (const std::exception &error) {
     if (!lock.owns_lock())
       lock.lock();
     record_failure_locked(std::string("rollback failed: ") + error.what());
     persist_locked();
+    audit_locked(actor, "deployment.rollback", "failed", record_.message);
     throw;
   }
 }
@@ -573,6 +607,22 @@ void AgentDeploymentState::complete_operation_locked() {
   record_.operation = ReconciliationOperation::None;
   operation_in_progress_ = false;
   record_.operation_started_at.clear();
+}
+
+void AgentDeploymentState::audit_locked(const std::string &actor,
+                                        const std::string &action,
+                                        const std::string &outcome,
+                                        const std::string &message) const {
+  if (!audit_)
+    return;
+  audit_->append({actor.empty() ? "unknown" : actor,
+                  action,
+                  outcome,
+                  record_.deployment_id,
+                  record_.artifact,
+                  deployment_phase_name(record_.phase),
+                  reconciliation_operation_name(record_.operation),
+                  message.empty() ? record_.message : message});
 }
 
 bool AgentDeploymentState::observe_locked(
@@ -604,6 +654,8 @@ bool AgentDeploymentState::observe_locked(
   if (!matches)
     record_failure_locked("runtime drift detected: observed workload does not "
                           "match desired artifact");
+  if (!matches && !previous_drift)
+    audit_locked("agent", "runtime.drift", "detected", record_.message);
   return previous_artifact != record_.observed_artifact ||
          previous_workload_fingerprint !=
              record_.observed_workload_fingerprint ||
@@ -643,6 +695,7 @@ void AgentDeploymentState::recover_interrupted_locked(
   }
   record_.updated_at = utc_timestamp();
   complete_operation_locked();
+  audit_locked("agent", "deployment.recover", "completed", record_.message);
 }
 
 DeploymentRecord AgentDeploymentState::refresh_observed(
@@ -662,13 +715,15 @@ DeploymentRecord AgentDeploymentState::refresh_observed(
     record_failure_locked(std::string("runtime inspection failed: ") +
                           error.what());
     persist_locked();
+    audit_locked("agent", "runtime.inspect", "failed", record_.message);
   }
   return record_;
 }
 
 DeploymentRecord
 AgentDeploymentState::fail_activation(const std::string &deployment_id,
-                                      const std::string &message) {
+                                      const std::string &message,
+                                      const std::string &actor) {
   std::lock_guard lock(mutex_);
   if (record_.deployment_id != deployment_id ||
       record_.phase != DeploymentPhase::Active ||
@@ -676,6 +731,7 @@ AgentDeploymentState::fail_activation(const std::string &deployment_id,
     throw std::runtime_error("deployment is not active");
   record_failure_locked("activation readiness failed: " + message);
   persist_locked();
+  audit_locked(actor, "deployment.readiness", "failed", record_.message);
   return record_;
 }
 
