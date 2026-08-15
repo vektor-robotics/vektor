@@ -224,6 +224,43 @@ this same deadline.
 a newly published ROS health snapshot. The activation RPC deadline covers both
 windows, so a stale pre-deployment health result cannot approve a release.
 
+### Signed rollout approvals
+
+Set `environment`, `approval_policy`, and `approval_file` in rollout YAML to
+gate sensitive environments or waves larger than the policy threshold. The
+policy lists trusted approver public keys, the number of distinct signatures
+required, and the maximum approval lifetime. Relative paths resolve from the
+file that declares them. See `config/approval-policy.example.yaml` and
+`config/approvals.example.yaml`.
+
+Each approval is signed over a canonical payload bound to the exact deployment
+ID, OCI digest, fleet ID, workload ID, environment, wave, approver identity,
+and UTC validity window. Generate that payload without exposing a private key:
+
+```bash
+ros2 run vektor vektor approval-payload \
+  --config config/rollout.example.yaml --wave canary \
+  --identity safety-lead \
+  --issued-at 2026-08-15T10:00:00Z \
+  --expires-at 2026-08-15T18:00:00Z > approval.payload
+```
+
+Sign it on the approver's machine and place the base64 result in the matching
+record in the approval bundle:
+
+```bash
+openssl dgst -sha256 -sign safety-lead.private.pem approval.payload \
+  | base64 -w0
+```
+
+Every required approver signs their own identity-specific payload. Duplicate,
+expired, future-dated, overlong, untrusted, incorrectly bound, or invalid
+signatures do not count. If the threshold is not met, VEKTOR returns
+`VEKTOR_APPROVAL_REQUIRED` before target-wave polling or agent mutation.
+Automatic rollback never requires approval. Protect the rollout config,
+approval policy, and approver public keys with the control-plane host's file
+permissions; these files define the approval trust boundary.
+
 The initial runtime driver manages one container, named `vektor-workload` by
 default. Override the name with `--runtime-container`. A strict optional
 `workload` mapping in the rollout config controls `network` (`host`, `bridge`,
@@ -345,6 +382,7 @@ src/reporter.cpp      Check output and exit semantics
 src/status.cpp        Fleet-ready snapshots and bounded local history
 src/agent.cpp         Periodic inspection, mTLS, and gRPC service
 src/audit.cpp         Durable append-only deployment event records
+src/approval.cpp      Signed rollout approval policy and verification
 src/fleet.cpp         Inventory, targeting, concurrent polling, aggregation
 src/runtime.cpp       Versioned Docker/Podman runtime-driver implementation
 src/deployment.cpp    Desired/observed state and reconciliation transactions
@@ -354,6 +392,7 @@ src/main.cpp          CLI entry point
 config/example.yaml   Example health policy
 config/fleet.example.yaml  Example fleet inventory
 config/rollout.example.yaml  Example staged OCI rollout
+config/approval-policy.example.yaml  Example rollout approval policy
 test/                 GoogleTest coverage
 ```
 
@@ -368,7 +407,7 @@ sudo apt update
 sudo apt install -y ros-jazzy-rclcpp ros-jazzy-rclcpp-action \
   ros-jazzy-tf2-ros ros-jazzy-lifecycle-msgs libyaml-cpp-dev \
   ros-jazzy-ament-cmake-gtest libprotobuf-dev protobuf-compiler \
-  libgrpc++-dev protobuf-compiler-grpc
+  libgrpc++-dev protobuf-compiler-grpc libssl-dev
 source /opt/ros/jazzy/setup.bash
 ```
 

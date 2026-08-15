@@ -47,6 +47,12 @@ All notable changes to VEKTOR are documented here.
   including deployment-status recovery requests.
 - Agent-side fleet and workload bindings prevent callers from spoofing a scope
   label that does not identify the agent's configured resource.
+- Strict signed approval policies for sensitive environments and oversized
+  rollout waves, with distinct trusted approvers and bounded validity windows.
+- Approval signatures bound to the exact deployment digest, fleet, workload,
+  environment, and wave before target-wave polling or agent mutation.
+- Rollout JSON schema v3 fields for approval requirements and verified
+  approver identities.
 
 ## [0.5.0] - 2026-08-14
 

@@ -1,4 +1,5 @@
 #include "vektor/agent.hpp"
+#include "vektor/approval.hpp"
 #include "vektor/config.hpp"
 #include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
@@ -8,6 +9,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -25,6 +27,10 @@ struct CliOptions {
   std::string robot_id;
   std::string fleet_id;
   std::string workload_id;
+  std::string wave;
+  std::string approval_identity;
+  std::string issued_at;
+  std::string expires_at;
   bool watch{false};
   bool history{true};
   std::chrono::milliseconds interval{5000};
@@ -71,7 +77,10 @@ struct CliOptions {
             << "                [--limit <count>] [--watch] "
                "[--interval-ms <ms>]\n"
             << "  vektor deploy|promote|rollback --config <rollout.yaml> "
-               "[--format text|json]\n";
+               "[--format text|json]\n"
+            << "  vektor approval-payload --config <rollout.yaml> "
+               "--wave <name> --identity <id>\n"
+            << "                --issued-at <UTC> --expires-at <UTC>\n";
   throw std::invalid_argument("invalid command line");
 }
 
@@ -90,7 +99,7 @@ CliOptions parse_cli(int argc, char **argv) {
   if (options.command != "check" && options.command != "status" &&
       options.command != "agent" && options.command != "fleet" &&
       options.command != "deploy" && options.command != "promote" &&
-      options.command != "rollback")
+      options.command != "rollback" && options.command != "approval-payload")
     usage_error("unknown command '" + options.command + "'");
 
   for (int index = 2; index < argc; ++index) {
@@ -105,6 +114,14 @@ CliOptions parse_cli(int argc, char **argv) {
       options.fleet_id = next_value(index, argc, argv, argument);
     else if (argument == "--workload-id")
       options.workload_id = next_value(index, argc, argv, argument);
+    else if (argument == "--wave")
+      options.wave = next_value(index, argc, argv, argument);
+    else if (argument == "--identity")
+      options.approval_identity = next_value(index, argc, argv, argument);
+    else if (argument == "--issued-at")
+      options.issued_at = next_value(index, argc, argv, argument);
+    else if (argument == "--expires-at")
+      options.expires_at = next_value(index, argc, argv, argument);
     else if (argument == "--watch")
       options.watch = true;
     else if (argument == "--interval-ms") {
@@ -171,6 +188,12 @@ CliOptions parse_cli(int argc, char **argv) {
     usage_error("--config is required");
   if (options.format != "text" && options.format != "json")
     usage_error("--format must be text or json");
+  const bool approval_payload_command = options.command == "approval-payload";
+  const bool has_approval_payload_options =
+      !options.wave.empty() || !options.approval_identity.empty() ||
+      !options.issued_at.empty() || !options.expires_at.empty();
+  if (!approval_payload_command && has_approval_payload_options)
+    usage_error("approval-payload option used with another command");
   if (options.command == "check" &&
       (options.watch || !options.robot_id.empty() ||
        !options.fleet_id.empty() || !options.workload_id.empty() ||
@@ -228,6 +251,27 @@ CliOptions parse_cli(int argc, char **argv) {
        options.authorization_policy ||
        options.interval != std::chrono::milliseconds(5000)))
     usage_error("option is not supported by rollout commands");
+  if (approval_payload_command) {
+    if (options.wave.empty() || options.approval_identity.empty() ||
+        options.issued_at.empty() || options.expires_at.empty())
+      usage_error(
+          "approval-payload requires --wave, --identity, --issued-at, and "
+          "--expires-at");
+    if (options.format != "text" || options.watch ||
+        !options.robot_id.empty() || !options.fleet_id.empty() ||
+        !options.workload_id.empty() || options.history_path ||
+        !options.history || options.insecure || options.tls_certificate ||
+        options.tls_private_key || options.tls_client_ca ||
+        options.listen_address != "127.0.0.1:50051" ||
+        !options.selectors.empty() || options.limit ||
+        options.deployment_state != ".vektor/deployment.yaml" ||
+        options.audit_log != ".vektor/audit.jsonl" ||
+        options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" ||
+        options.trust_policy || options.authorization_policy ||
+        options.interval != std::chrono::milliseconds(5000))
+      usage_error("option is not supported by approval-payload");
+  }
   return options;
 }
 
@@ -346,6 +390,24 @@ int run_rollout(const CliOptions &options,
     vektor::print_rollout_report(report, std::cout);
   return report.success ? 0 : 1;
 }
+
+int run_approval_payload(const CliOptions &options,
+                         const vektor::RolloutConfig &config) {
+  if (std::none_of(config.waves.begin(), config.waves.end(),
+                   [&](const auto &wave) { return wave.name == options.wave; }))
+    throw std::invalid_argument("unknown rollout wave '" + options.wave + "'");
+  const auto fleet =
+      vektor::load_fleet_config(config.fleet_config_path.string());
+  const vektor::ApprovalRecord record{{config.deployment_id, config.artifact,
+                                       fleet.fleet_id, config.workload_id,
+                                       config.environment, options.wave},
+                                      options.approval_identity,
+                                      options.issued_at,
+                                      options.expires_at,
+                                      {}};
+  std::cout << vektor::approval_signing_payload(record);
+  return 0;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -353,8 +415,11 @@ int main(int argc, char **argv) {
   try {
     const auto options = parse_cli(argc, argv);
     int exit_code = 0;
-    if (options.command == "deploy" || options.command == "promote" ||
-        options.command == "rollback") {
+    if (options.command == "approval-payload") {
+      exit_code = run_approval_payload(
+          options, vektor::load_rollout_config(options.config_path));
+    } else if (options.command == "deploy" || options.command == "promote" ||
+               options.command == "rollback") {
       exit_code = run_rollout(options,
                               vektor::load_rollout_config(options.config_path));
     } else if (options.command == "fleet") {
