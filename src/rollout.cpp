@@ -297,12 +297,17 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
   context.set_deadline(std::chrono::system_clock::now() + rpc_timeout);
   vektor::agent::v1::DeploymentRecord response;
   grpc::Status status;
+  const auto set_scope = [&](auto *scope) {
+    scope->set_fleet_id(fleet.fleet_id);
+    scope->set_workload_id(rollout.workload_id);
+  };
   if (action == RpcAction::Prepare) {
     vektor::agent::v1::PrepareDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
     request.set_artifact(rollout.artifact);
     *request.mutable_workload() = to_proto(rollout.workload);
     request.set_operation_timeout_ms(rollout.operation_timeout.count());
+    set_scope(request.mutable_scope());
     status = stub->PrepareDeployment(&context, request, &response);
   } else if (action == RpcAction::Activate) {
     vektor::agent::v1::ActivateDeploymentRequest request;
@@ -310,14 +315,17 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     request.set_operation_timeout_ms(rollout.operation_timeout.count());
     request.set_readiness_timeout_ms(rollout.readiness_timeout.count());
     request.set_allow_degraded(rollout.allow_degraded);
+    set_scope(request.mutable_scope());
     status = stub->ActivateDeployment(&context, request, &response);
   } else if (action == RpcAction::Rollback) {
     vektor::agent::v1::RollbackDeploymentRequest request;
     request.set_deployment_id(rollout.deployment_id);
     request.set_operation_timeout_ms(rollout.operation_timeout.count());
+    set_scope(request.mutable_scope());
     status = stub->RollbackDeployment(&context, request, &response);
   } else {
     vektor::agent::v1::GetDeploymentRequest request;
+    set_scope(request.mutable_scope());
     status = stub->GetDeployment(&context, request, &response);
   }
   if (!status.ok()) {
@@ -328,6 +336,7 @@ RolloutRobotResult call_agent(const FleetConfig &fleet,
     recovery_context.set_deadline(std::chrono::system_clock::now() +
                                   fleet.request_timeout);
     vektor::agent::v1::GetDeploymentRequest recovery_request;
+    set_scope(recovery_request.mutable_scope());
     vektor::agent::v1::DeploymentRecord recovery_response;
     const auto recovery_status = stub->GetDeployment(
         &recovery_context, recovery_request, &recovery_response);
@@ -497,9 +506,10 @@ RolloutConfig load_rollout_config(const std::string &path) {
                              "': " + error.what());
   }
   reject_unknown(root,
-                 {"schema_version", "deployment_id", "artifact", "fleet_config",
-                  "state_file", "operation_timeout_ms", "readiness_timeout_ms",
-                  "settle_time_ms", "allow_degraded", "workload", "waves"},
+                 {"schema_version", "deployment_id", "workload_id", "artifact",
+                  "fleet_config", "state_file", "operation_timeout_ms",
+                  "readiness_timeout_ms", "settle_time_ms", "allow_degraded",
+                  "workload", "waves"},
                  "root");
   if (!root["schema_version"] || root["schema_version"].as<unsigned int>() != 1)
     invalid("schema_version", "must be 1");
@@ -507,6 +517,11 @@ RolloutConfig load_rollout_config(const std::string &path) {
   config.deployment_id = require_string(root["deployment_id"], "deployment_id");
   if (!is_valid_deployment_id(config.deployment_id))
     invalid("deployment_id", "use letters, numbers, '.', '_', or '-'");
+  config.workload_id = root["workload_id"]
+                           ? require_string(root["workload_id"], "workload_id")
+                           : config.deployment_id;
+  if (!is_valid_deployment_id(config.workload_id))
+    invalid("workload_id", "use letters, numbers, '.', '_', or '-'");
   config.artifact = require_string(root["artifact"], "artifact");
   if (!is_pinned_oci_artifact(config.artifact))
     invalid("artifact", "must be pinned by a sha256 digest");

@@ -92,6 +92,17 @@ TEST(AgentOptions, RequiresMutualTlsForAuthorizationPolicy) {
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
 }
 
+TEST(AgentOptions, RequiresServerBoundScopeForAuthorizationPolicy) {
+  vektor::AgentOptions options;
+  options.authorization_policy_path = "authorization.yaml";
+  options.tls_certificate = "server.crt";
+  options.tls_private_key = "server.key";
+  options.tls_client_ca = "client-ca.crt";
+  EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
+  options.resource_scope = {"warehouse-prod", "picker"};
+  EXPECT_NO_THROW(vektor::validate_agent_options(options));
+}
+
 TEST(AgentStatusState, PublishesAndWaitsForVersionedSnapshots) {
   vektor::AgentStatusState state;
   EXPECT_FALSE(state.latest().has_value());

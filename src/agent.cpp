@@ -120,6 +120,17 @@ void validate_agent_options(const AgentOptions &options) {
   if (options.authorization_policy_path &&
       options.authorization_policy_path->empty())
     throw std::invalid_argument("authorization policy path cannot be empty");
+  if (options.authorization_policy_path &&
+      (options.resource_scope.fleet_id.empty() ||
+       options.resource_scope.workload_id.empty()))
+    throw std::invalid_argument(
+        "authorization policy requires --fleet-id and --workload-id");
+  if ((!options.resource_scope.fleet_id.empty() &&
+       !is_valid_deployment_id(options.resource_scope.fleet_id)) ||
+      (!options.resource_scope.workload_id.empty() &&
+       !is_valid_deployment_id(options.resource_scope.workload_id)))
+    throw std::invalid_argument(
+        "fleet and workload IDs may use letters, numbers, '.', '_', or '-'");
   if (options.insecure) {
     if (options.authorization_policy_path)
       throw std::invalid_argument(
@@ -202,16 +213,27 @@ GrpcAgentService::GrpcAgentService(const AgentStatusState &state)
 
 GrpcAgentService::GrpcAgentService(
     const AgentStatusState &state, AgentDeploymentState &deployment_state,
-    std::shared_ptr<const AuthorizationPolicy> authorization)
+    std::shared_ptr<const AuthorizationPolicy> authorization,
+    AuthorizationScope resource_scope)
     : state_(state), deployment_state_(&deployment_state),
-      authorization_(std::move(authorization)) {}
+      authorization_(std::move(authorization)),
+      resource_scope_(std::move(resource_scope)) {}
 
-grpc::Status GrpcAgentService::authorize(const grpc::ServerContext &context,
-                                         AuthorizationAction action) const {
+grpc::Status
+GrpcAgentService::authorize(const grpc::ServerContext &context,
+                            AuthorizationAction action,
+                            const vektor::agent::v1::AuthorizationScope &scope,
+                            bool require_workload) const {
   if (!authorization_)
     return grpc::Status::OK;
   const auto identity = authenticated_identity(context);
-  if (identity && authorization_->allows(*identity, action))
+  const auto request_matches_resource = authorization_scope_matches(
+      resource_scope_, {scope.fleet_id(), scope.workload_id()},
+      require_workload);
+  if (identity &&
+      authorization_->allows(*identity, action, resource_scope_,
+                             require_workload) &&
+      request_matches_resource)
     return grpc::Status::OK;
   const auto detail = authorization_denial_json(action);
   if (deployment_state_) {
@@ -226,9 +248,10 @@ grpc::Status GrpcAgentService::authorize(const grpc::ServerContext &context,
 
 grpc::Status
 GrpcAgentService::GetStatus(grpc::ServerContext *context,
-                            const vektor::agent::v1::GetStatusRequest *,
+                            const vektor::agent::v1::GetStatusRequest *request,
                             vektor::agent::v1::StatusSnapshot *response) {
-  if (const auto status = authorize(*context, AuthorizationAction::Inspect);
+  if (const auto status = authorize(*context, AuthorizationAction::Inspect,
+                                    request->scope(), false);
       !status.ok())
     return status;
   const auto latest = state_.latest();
@@ -243,7 +266,8 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::PrepareDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
-  if (const auto status = authorize(*context, AuthorizationAction::Deploy);
+  if (const auto status = authorize(*context, AuthorizationAction::Deploy,
+                                    request->scope(), true);
       !status.ok())
     return status;
   if (!deployment_state_)
@@ -271,7 +295,8 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::ActivateDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
-  if (const auto status = authorize(*context, AuthorizationAction::Promote);
+  if (const auto status = authorize(*context, AuthorizationAction::Promote,
+                                    request->scope(), true);
       !status.ok())
     return status;
   if (!deployment_state_)
@@ -320,7 +345,8 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::RollbackDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
-  if (const auto status = authorize(*context, AuthorizationAction::Rollback);
+  if (const auto status = authorize(*context, AuthorizationAction::Rollback,
+                                    request->scope(), true);
       !status.ok())
     return status;
   if (!deployment_state_)
@@ -340,11 +366,12 @@ grpc::Status GrpcAgentService::RollbackDeployment(
   }
 }
 
-grpc::Status
-GrpcAgentService::GetDeployment(grpc::ServerContext *context,
-                                const vektor::agent::v1::GetDeploymentRequest *,
-                                vektor::agent::v1::DeploymentRecord *response) {
-  if (const auto status = authorize(*context, AuthorizationAction::Inspect);
+grpc::Status GrpcAgentService::GetDeployment(
+    grpc::ServerContext *context,
+    const vektor::agent::v1::GetDeploymentRequest *request,
+    vektor::agent::v1::DeploymentRecord *response) {
+  if (const auto status = authorize(*context, AuthorizationAction::Inspect,
+                                    request->scope(), true);
       !status.ok())
     return status;
   if (!deployment_state_)
@@ -355,9 +382,11 @@ GrpcAgentService::GetDeployment(grpc::ServerContext *context,
 }
 
 grpc::Status GrpcAgentService::WatchStatus(
-    grpc::ServerContext *context, const vektor::agent::v1::WatchStatusRequest *,
+    grpc::ServerContext *context,
+    const vektor::agent::v1::WatchStatusRequest *request,
     grpc::ServerWriter<vektor::agent::v1::StatusSnapshot> *writer) {
-  if (const auto status = authorize(*context, AuthorizationAction::Inspect);
+  if (const auto status = authorize(*context, AuthorizationAction::Inspect,
+                                    request->scope(), false);
       !status.ok())
     return status;
   std::uint64_t sequence = 0;
@@ -400,7 +429,8 @@ int AgentRunner::run() {
     if (restored.drift_detected)
       RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
   }
-  GrpcAgentService service(state_, deployment_state, std::move(authorization));
+  GrpcAgentService service(state_, deployment_state, std::move(authorization),
+                           options_.resource_scope);
   grpc::ServerBuilder builder;
   int bound_port = 0;
   builder.AddListeningPort(options_.listen_address,

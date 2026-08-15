@@ -20,6 +20,7 @@ struct DeploymentWave {
 
 struct RolloutConfig {
   std::string deployment_id;
+  std::string workload_id;
   std::string artifact;
   WorkloadSpec workload;
   std::filesystem::path fleet_config_path;

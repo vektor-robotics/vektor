@@ -68,6 +68,85 @@ TEST(AuthorizationPolicy, AppliesFixedRoleCapabilities) {
                              vektor::AuthorizationAction::Inspect));
 }
 
+TEST(AuthorizationPolicy, EnforcesFleetAndWorkloadScopesInSchemaTwo) {
+  PolicyFile file;
+  {
+    std::ofstream policy(file.path);
+    policy << "schema_version: 2\nidentities:\n"
+              "  - identity: release@example.com\n"
+              "    roles: [deployer]\n"
+              "    scopes:\n"
+              "      fleets: [warehouse-prod]\n"
+              "      workloads: [picker]\n"
+              "  - identity: sre@example.com\n"
+              "    roles: [operator]\n"
+              "    scopes:\n"
+              "      fleets: ['*']\n"
+              "      workloads: ['*']\n";
+  }
+  const auto policy = vektor::load_authorization_policy(file.path);
+
+  EXPECT_TRUE(policy.allows("release@example.com",
+                            vektor::AuthorizationAction::Deploy,
+                            {"warehouse-prod", "picker"}, true));
+  EXPECT_FALSE(policy.allows("release@example.com",
+                             vektor::AuthorizationAction::Deploy,
+                             {"warehouse-dev", "picker"}, true));
+  EXPECT_FALSE(policy.allows("release@example.com",
+                             vektor::AuthorizationAction::Deploy,
+                             {"warehouse-prod", "sorter"}, true));
+  EXPECT_FALSE(policy.allows("release@example.com",
+                             vektor::AuthorizationAction::Deploy, {}, true));
+  EXPECT_TRUE(policy.allows("release@example.com",
+                            vektor::AuthorizationAction::Inspect,
+                            {"warehouse-prod", ""}, false));
+  EXPECT_TRUE(policy.allows("sre@example.com",
+                            vektor::AuthorizationAction::Rollback,
+                            {"any-fleet", "any-workload"}, true));
+}
+
+TEST(AuthorizationPolicy, RequiresStrictNonEmptyScopesInSchemaTwo) {
+  PolicyFile file;
+  {
+    std::ofstream policy(file.path);
+    policy << "schema_version: 2\nidentities:\n"
+              "  - identity: user@example.com\n    roles: [viewer]\n";
+  }
+  EXPECT_THROW(vektor::load_authorization_policy(file.path),
+               std::runtime_error);
+  {
+    std::ofstream policy(file.path);
+    policy << "schema_version: 2\nidentities:\n"
+              "  - identity: user@example.com\n    roles: [viewer]\n"
+              "    scopes:\n      fleets: []\n      workloads: [picker]\n";
+  }
+  EXPECT_THROW(vektor::load_authorization_policy(file.path),
+               std::runtime_error);
+  {
+    std::ofstream policy(file.path);
+    policy << "schema_version: 2\nidentities:\n"
+              "  - identity: user@example.com\n    roles: [viewer]\n"
+              "    scopes:\n      fleets: [prod]\n      workloads: [picker]\n"
+              "      regions: [eu]\n";
+  }
+  EXPECT_THROW(vektor::load_authorization_policy(file.path),
+               std::runtime_error);
+}
+
+TEST(AuthorizationPolicy, BindsRequestsToTheAgentsConfiguredResource) {
+  const vektor::AuthorizationScope resource{"warehouse-prod", "picker"};
+  EXPECT_TRUE(vektor::authorization_scope_matches(
+      resource, {"warehouse-prod", "picker"}, true));
+  EXPECT_FALSE(vektor::authorization_scope_matches(
+      resource, {"warehouse-dev", "picker"}, true));
+  EXPECT_FALSE(vektor::authorization_scope_matches(
+      resource, {"warehouse-prod", "sorter"}, true));
+  EXPECT_TRUE(vektor::authorization_scope_matches(
+      resource, {"warehouse-prod", ""}, false));
+  EXPECT_FALSE(
+      vektor::authorization_scope_matches({}, {"warehouse-prod", ""}, false));
+}
+
 TEST(AuthorizationPolicy, RejectsUnknownFieldsRolesAndDuplicateIdentities) {
   PolicyFile file;
   {
