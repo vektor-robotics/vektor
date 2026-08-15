@@ -1,0 +1,13 @@
+schema_version: 1
+identities:
+  - identity: release-manager
+    roles:
+      - deployer
+
+  - identity: fleet-operator
+    roles:
+      - operator
+
+  - identity: fleet-observer
+    roles:
+      - viewer

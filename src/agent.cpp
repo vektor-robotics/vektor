@@ -84,14 +84,20 @@ bool health_ready(HealthState state, bool allow_degraded) {
          (allow_degraded && state == HealthState::Degraded);
 }
 
-std::string audit_actor(const grpc::ServerContext &context) {
+std::optional<std::string>
+authenticated_identity(const grpc::ServerContext &context) {
   const auto authentication = context.auth_context();
   if (authentication && authentication->IsPeerAuthenticated()) {
     const auto identities = authentication->GetPeerIdentity();
     if (!identities.empty())
-      return "mtls:" +
-             std::string(identities.front().data(), identities.front().size());
+      return std::string(identities.front().data(), identities.front().size());
   }
+  return std::nullopt;
+}
+
+std::string audit_actor(const grpc::ServerContext &context) {
+  if (const auto identity = authenticated_identity(context); identity)
+    return "mtls:" + *identity;
   return "unauthenticated:" + context.peer();
 }
 } // namespace
@@ -111,7 +117,13 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("invalid runtime container name");
   if (options.trust_policy_path && options.trust_policy_path->empty())
     throw std::invalid_argument("trust policy path cannot be empty");
+  if (options.authorization_policy_path &&
+      options.authorization_policy_path->empty())
+    throw std::invalid_argument("authorization policy path cannot be empty");
   if (options.insecure) {
+    if (options.authorization_policy_path)
+      throw std::invalid_argument(
+          "authorization policy requires mutually authenticated TLS");
     if (!is_loopback_address(options.listen_address))
       throw std::invalid_argument(
           "--insecure is limited to loopback or Unix socket listeners");
@@ -188,14 +200,37 @@ vektor::agent::v1::StatusSnapshot to_proto(const VersionedSnapshot &versioned) {
 GrpcAgentService::GrpcAgentService(const AgentStatusState &state)
     : state_(state) {}
 
-GrpcAgentService::GrpcAgentService(const AgentStatusState &state,
-                                   AgentDeploymentState &deployment_state)
-    : state_(state), deployment_state_(&deployment_state) {}
+GrpcAgentService::GrpcAgentService(
+    const AgentStatusState &state, AgentDeploymentState &deployment_state,
+    std::shared_ptr<const AuthorizationPolicy> authorization)
+    : state_(state), deployment_state_(&deployment_state),
+      authorization_(std::move(authorization)) {}
+
+grpc::Status GrpcAgentService::authorize(const grpc::ServerContext &context,
+                                         AuthorizationAction action) const {
+  if (!authorization_)
+    return grpc::Status::OK;
+  const auto identity = authenticated_identity(context);
+  if (identity && authorization_->allows(*identity, action))
+    return grpc::Status::OK;
+  const auto detail = authorization_denial_json(action);
+  if (deployment_state_) {
+    try {
+      deployment_state_->audit_authorization_denied(
+          audit_actor(context), authorization_action_name(action), detail);
+    } catch (...) {
+    }
+  }
+  return {grpc::StatusCode::PERMISSION_DENIED, detail};
+}
 
 grpc::Status
-GrpcAgentService::GetStatus(grpc::ServerContext *,
+GrpcAgentService::GetStatus(grpc::ServerContext *context,
                             const vektor::agent::v1::GetStatusRequest *,
                             vektor::agent::v1::StatusSnapshot *response) {
+  if (const auto status = authorize(*context, AuthorizationAction::Inspect);
+      !status.ok())
+    return status;
   const auto latest = state_.latest();
   if (!latest)
     return {grpc::StatusCode::UNAVAILABLE,
@@ -208,6 +243,9 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::PrepareDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  if (const auto status = authorize(*context, AuthorizationAction::Deploy);
+      !status.ok())
+    return status;
   if (!deployment_state_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
@@ -233,6 +271,9 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::ActivateDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  if (const auto status = authorize(*context, AuthorizationAction::Promote);
+      !status.ok())
+    return status;
   if (!deployment_state_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
@@ -245,9 +286,9 @@ grpc::Status GrpcAgentService::ActivateDeployment(
                         std::chrono::seconds(30), "readiness_timeout_ms");
     const auto before = state_.latest();
     const auto after_sequence = before ? before->sequence : 0;
-    const auto record = deployment_state_->activate(
-        request->deployment_id(), operation_timeout, readiness_timeout,
-        audit_actor(*context));
+    const auto record =
+        deployment_state_->activate(request->deployment_id(), operation_timeout,
+                                    readiness_timeout, audit_actor(*context));
     const auto fresh =
         state_.wait_for_change(after_sequence, readiness_timeout);
     if (context->IsCancelled())
@@ -267,8 +308,8 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
   } catch (const std::exception &error) {
     try {
-      deployment_state_->fail_activation(request->deployment_id(),
-                                         error.what(), audit_actor(*context));
+      deployment_state_->fail_activation(request->deployment_id(), error.what(),
+                                         audit_actor(*context));
     } catch (...) {
     }
     return {grpc::StatusCode::FAILED_PRECONDITION, error.what()};
@@ -279,6 +320,9 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::RollbackDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  if (const auto status = authorize(*context, AuthorizationAction::Rollback);
+      !status.ok())
+    return status;
   if (!deployment_state_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
@@ -286,9 +330,8 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     const auto timeout =
         request_timeout(request->operation_timeout_ms(),
                         std::chrono::minutes(5), "operation_timeout_ms");
-    *response = to_proto(
-        deployment_state_->rollback(request->deployment_id(), timeout,
-                                    audit_actor(*context)));
+    *response = to_proto(deployment_state_->rollback(
+        request->deployment_id(), timeout, audit_actor(*context)));
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -298,9 +341,12 @@ grpc::Status GrpcAgentService::RollbackDeployment(
 }
 
 grpc::Status
-GrpcAgentService::GetDeployment(grpc::ServerContext *,
+GrpcAgentService::GetDeployment(grpc::ServerContext *context,
                                 const vektor::agent::v1::GetDeploymentRequest *,
                                 vektor::agent::v1::DeploymentRecord *response) {
+  if (const auto status = authorize(*context, AuthorizationAction::Inspect);
+      !status.ok())
+    return status;
   if (!deployment_state_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
@@ -311,6 +357,9 @@ GrpcAgentService::GetDeployment(grpc::ServerContext *,
 grpc::Status GrpcAgentService::WatchStatus(
     grpc::ServerContext *context, const vektor::agent::v1::WatchStatusRequest *,
     grpc::ServerWriter<vektor::agent::v1::StatusSnapshot> *writer) {
+  if (const auto status = authorize(*context, AuthorizationAction::Inspect);
+      !status.ok())
+    return status;
   std::uint64_t sequence = 0;
   while (!context->IsCancelled()) {
     const auto snapshot =
@@ -337,17 +386,21 @@ int AgentRunner::run() {
   if (options_.trust_policy_path)
     verifier = std::make_shared<CosignArtifactVerifier>(
         load_trust_policy(*options_.trust_policy_path));
+  std::shared_ptr<const AuthorizationPolicy> authorization;
+  if (options_.authorization_policy_path)
+    authorization = std::make_shared<const AuthorizationPolicy>(
+        load_authorization_policy(*options_.authorization_policy_path));
   auto audit = std::make_shared<JsonLinesAuditLog>(options_.audit_log_path);
-  AgentDeploymentState deployment_state(
-      options_.deployment_state_path, std::move(runtime), std::move(verifier),
-      std::move(audit));
+  AgentDeploymentState deployment_state(options_.deployment_state_path,
+                                        std::move(runtime), std::move(verifier),
+                                        std::move(audit));
   if (deployment_state.current().phase != DeploymentPhase::Idle ||
       deployment_state.current().operation != ReconciliationOperation::None) {
     const auto restored = deployment_state.refresh_observed();
     if (restored.drift_detected)
       RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
   }
-  GrpcAgentService service(state_, deployment_state);
+  GrpcAgentService service(state_, deployment_state, std::move(authorization));
   grpc::ServerBuilder builder;
   int bound_port = 0;
   builder.AddListeningPort(options_.listen_address,
@@ -401,8 +454,7 @@ int AgentRunner::run() {
         try {
           const auto deployment = deployment_state.refresh_observed();
           if (deployment.drift_detected)
-            RCLCPP_ERROR(node_->get_logger(), "%s",
-                         deployment.message.c_str());
+            RCLCPP_ERROR(node_->get_logger(), "%s", deployment.message.c_str());
         } catch (const std::exception &error) {
           RCLCPP_ERROR(node_->get_logger(),
                        "deployment observation or audit failed: %s",

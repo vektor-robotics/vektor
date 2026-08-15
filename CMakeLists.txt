@@ -80,6 +80,7 @@ ament_target_dependencies(vektor_core
 
 add_library(vektor_deployment
   src/audit.cpp
+  src/authorization.cpp
   src/deployment.cpp
   src/runtime.cpp
   src/trust.cpp
@@ -176,6 +177,10 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_agent test/test_agent.cpp)
   target_link_libraries(test_agent vektor_agent vektor_proto gRPC::grpc++)
+
+  ament_add_gtest(test_authorization test/test_authorization.cpp)
+  target_link_libraries(test_authorization vektor_agent vektor_deployment
+    vektor_proto gRPC::grpc++)
 
   ament_add_gtest(test_fleet test/test_fleet.cpp)
   target_link_libraries(test_fleet vektor_fleet vektor_agent vektor_proto

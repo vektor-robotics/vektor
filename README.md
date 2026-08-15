@@ -66,12 +66,53 @@ ros2 run vektor vektor agent --config /etc/vektor/policy.yaml \
   --listen 0.0.0.0:50051 \
   --tls-cert /etc/vektor/tls/agent.crt \
   --tls-key /etc/vektor/tls/agent.key \
-  --tls-ca /etc/vektor/tls/client-ca.crt
+  --tls-ca /etc/vektor/tls/client-ca.crt \
+  --authorization-policy /etc/vektor/authorization.yaml
 ```
 
 The first request may return gRPC `UNAVAILABLE` until initial ROS discovery and
 inspection finish. The agent continues writing the bounded local status history
 while fleet connectivity is unavailable.
+
+### Role-based authorization
+
+Pass `--authorization-policy <path>` to map authenticated client-certificate
+identities to fixed roles. Authorization policies require mutual TLS, are strict
+versioned YAML, and deny identities not listed in the policy. The identity value
+must exactly match the peer identity selected by gRPC from the verified client
+certificate; audit records show the same value prefixed with `mtls:`.
+
+```yaml
+schema_version: 1
+identities:
+  - identity: release-manager
+    roles: [deployer]
+  - identity: fleet-operator
+    roles: [operator]
+  - identity: fleet-observer
+    roles: [viewer]
+```
+
+| Role | Inspect | Deploy | Promote | Roll back |
+| --- | --- | --- | --- | --- |
+| `viewer` | yes | no | no | no |
+| `deployer` | yes | yes | yes | no |
+| `operator` | yes | yes | yes | yes |
+| `admin` | yes | yes | yes | yes |
+
+`GetStatus`, `WatchStatus`, and `GetDeployment` require `inspect`;
+`PrepareDeployment`, `ActivateDeployment`, and `RollbackDeployment` require
+`deploy`, `promote`, and `rollback` respectively. A denial returns gRPC
+`PERMISSION_DENIED` before runtime mutation and a stable error body such as:
+
+```json
+{"schema_version":1,"code":"VEKTOR_AUTHORIZATION_DENIED","action":"deploy"}
+```
+
+Denied requests are recorded as append-only `authorization.<action>` audit
+events. Omitting `--authorization-policy` preserves the pre-v0.8 behavior while
+operators migrate existing installations. See
+`config/authorization.example.yaml` for a complete example.
 
 ## Fleet inventory and targeting
 

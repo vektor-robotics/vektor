@@ -37,6 +37,10 @@ All notable changes to VEKTOR are documented here.
   unsigned, wrong-key, and post-signing tag-tampering cases.
 - Explicit, secure-by-default public-key policy controls for isolated HTTP
   registries and signatures intentionally excluded from a transparency log.
+- Strict mTLS identity-to-role authorization for inspect, deploy, promote, and
+  rollback RPCs, with pre-mutation enforcement and audited denials.
+- Stable JSON `VEKTOR_AUTHORIZATION_DENIED` error bodies carried by gRPC
+  `PERMISSION_DENIED` responses.
 
 ## [0.5.0] - 2026-08-14
 

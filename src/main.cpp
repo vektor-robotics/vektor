@@ -39,6 +39,7 @@ struct CliOptions {
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy;
+  std::optional<std::filesystem::path> authorization_policy;
 };
 
 [[noreturn]] void usage_error(const std::string &message = {}) {
@@ -60,7 +61,8 @@ struct CliOptions {
                "[--runtime-container <name>] "
                "[--deployment-state <path>] "
                "[--audit-log <path>] "
-               "[--trust-policy <path>]\n"
+               "[--trust-policy <path>] "
+               "[--authorization-policy <path>]\n"
             << "  vektor fleet  --config <path> [--format text|json] "
                "[--selector key=value]...\n"
             << "                [--limit <count>] [--watch] "
@@ -135,6 +137,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.runtime_container = next_value(index, argc, argv, argument);
     else if (argument == "--trust-policy")
       options.trust_policy = next_value(index, argc, argv, argument);
+    else if (argument == "--authorization-policy")
+      options.authorization_policy = next_value(index, argc, argv, argument);
     else if (argument == "--selector")
       options.selectors.push_back(next_value(index, argc, argv, argument));
     else if (argument == "--limit") {
@@ -168,6 +172,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
        options.runtime_container != "vektor-workload" || options.trust_policy ||
+       options.authorization_policy ||
        options.listen_address != "127.0.0.1:50051" ||
        !options.selectors.empty() || options.limit))
     usage_error("status-only option used with check");
@@ -178,7 +183,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" || !options.selectors.empty() ||
        options.runtime_container != "vektor-workload" || options.trust_policy ||
-       options.limit))
+       options.authorization_policy || options.limit))
     usage_error("agent-only option used with status");
   if (options.command == "agent" &&
       (options.watch || options.format != "text" ||
@@ -191,7 +196,8 @@ CliOptions parse_cli(int argc, char **argv) {
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
-       options.runtime_container != "vektor-workload" || options.trust_policy))
+       options.runtime_container != "vektor-workload" || options.trust_policy ||
+       options.authorization_policy))
     usage_error("option is not supported by fleet");
   const bool rollout_command = options.command == "deploy" ||
                                options.command == "promote" ||
@@ -206,6 +212,7 @@ CliOptions parse_cli(int argc, char **argv) {
        options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
        options.runtime_container != "vektor-workload" || options.trust_policy ||
+       options.authorization_policy ||
        options.interval != std::chrono::milliseconds(5000)))
     usage_error("option is not supported by rollout commands");
   return options;
@@ -278,6 +285,7 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   agent_options.oci_runtime = options.oci_runtime;
   agent_options.runtime_container = options.runtime_container;
   agent_options.trust_policy_path = options.trust_policy;
+  agent_options.authorization_policy_path = options.authorization_policy;
   const auto robot_id =
       options.robot_id.empty() ? config.robot_id : options.robot_id;
   return vektor::AgentRunner(node, config, robot_id, std::move(agent_options))

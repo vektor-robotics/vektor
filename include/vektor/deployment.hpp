@@ -1,7 +1,7 @@
 #pragma once
 
-#include "vektor/audit.hpp"
 #include "vektor/agent/v1/agent.grpc.pb.h"
+#include "vektor/audit.hpp"
 #include "vektor/runtime.hpp"
 #include "vektor/trust.hpp"
 
@@ -60,11 +60,11 @@ public:
                        std::shared_ptr<ArtifactVerifier> verifier = nullptr,
                        std::shared_ptr<AuditSink> audit = nullptr);
 
-  DeploymentRecord prepare(
-      const std::string &deployment_id, const std::string &artifact,
-      WorkloadSpec workload = {},
-      std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
-      const std::string &actor = "agent");
+  DeploymentRecord
+  prepare(const std::string &deployment_id, const std::string &artifact,
+          WorkloadSpec workload = {},
+          std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
+          const std::string &actor = "agent");
   DeploymentRecord activate(
       const std::string &deployment_id,
       std::chrono::milliseconds operation_timeout = std::chrono::minutes(5),
@@ -80,6 +80,9 @@ public:
                                    const std::string &message,
                                    const std::string &actor = "agent");
   DeploymentRecord current() const;
+  void audit_authorization_denied(const std::string &actor,
+                                  const std::string &action,
+                                  const std::string &message) const;
 
 private:
   void load();
