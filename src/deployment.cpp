@@ -248,7 +248,8 @@ bool is_pinned_oci_artifact(const std::string &artifact) {
 
 AgentDeploymentState::AgentDeploymentState(
     std::filesystem::path state_path, std::shared_ptr<RuntimeDriver> runtime,
-    std::shared_ptr<ArtifactVerifier> verifier, std::shared_ptr<AuditSink> audit)
+    std::shared_ptr<ArtifactVerifier> verifier,
+    std::shared_ptr<AuditSink> audit)
     : state_path_(std::move(state_path)), runtime_(std::move(runtime)),
       verifier_(std::move(verifier)), audit_(std::move(audit)) {
   if (state_path_.empty())
@@ -615,14 +616,18 @@ void AgentDeploymentState::audit_locked(const std::string &actor,
                                         const std::string &message) const {
   if (!audit_)
     return;
-  audit_->append({actor.empty() ? "unknown" : actor,
-                  action,
-                  outcome,
-                  record_.deployment_id,
-                  record_.artifact,
+  audit_->append({actor.empty() ? "unknown" : actor, action, outcome,
+                  record_.deployment_id, record_.artifact,
                   deployment_phase_name(record_.phase),
                   reconciliation_operation_name(record_.operation),
                   message.empty() ? record_.message : message});
+}
+
+void AgentDeploymentState::audit_authorization_denied(
+    const std::string &actor, const std::string &action,
+    const std::string &message) const {
+  std::lock_guard lock(mutex_);
+  audit_locked(actor, "authorization." + action, "denied", message);
 }
 
 bool AgentDeploymentState::observe_locked(

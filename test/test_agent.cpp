@@ -2,8 +2,8 @@
 
 #include <gtest/gtest.h>
 
-#include <future>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <string>
 #include <thread>
@@ -31,8 +31,8 @@ constexpr auto kArtifact =
 class AuditRuntime final : public vektor::RuntimeDriver {
 public:
   void prepare(const std::string &) override { ++prepare_calls; }
-  vektor::RuntimeObservation
-  activate(const std::string &, const vektor::WorkloadSpec &) override {
+  vektor::RuntimeObservation activate(const std::string &,
+                                      const vektor::WorkloadSpec &) override {
     return {};
   }
   vektor::RuntimeObservation stop() override { return {}; }
@@ -82,6 +82,13 @@ TEST(AgentOptions, RequiresAuditLogPath) {
   vektor::AgentOptions options;
   options.insecure = true;
   options.audit_log_path.clear();
+  EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
+}
+
+TEST(AgentOptions, RequiresMutualTlsForAuthorizationPolicy) {
+  vektor::AgentOptions options;
+  options.insecure = true;
+  options.authorization_policy_path = "authorization.yaml";
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
 }
 

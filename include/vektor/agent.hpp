@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vektor/agent/v1/agent.grpc.pb.h"
+#include "vektor/authorization.hpp"
 #include "vektor/config.hpp"
 #include "vektor/deployment.hpp"
 #include "vektor/status.hpp"
@@ -12,6 +13,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -32,6 +34,7 @@ struct AgentOptions {
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy_path;
+  std::optional<std::filesystem::path> authorization_policy_path;
 };
 
 void validate_agent_options(const AgentOptions &options);
@@ -63,8 +66,9 @@ vektor::agent::v1::StatusSnapshot to_proto(const VersionedSnapshot &snapshot);
 class GrpcAgentService final : public vektor::agent::v1::Agent::Service {
 public:
   explicit GrpcAgentService(const AgentStatusState &state);
-  GrpcAgentService(const AgentStatusState &state,
-                   AgentDeploymentState &deployment_state);
+  GrpcAgentService(
+      const AgentStatusState &state, AgentDeploymentState &deployment_state,
+      std::shared_ptr<const AuthorizationPolicy> authorization = nullptr);
 
   grpc::Status GetStatus(grpc::ServerContext *context,
                          const vektor::agent::v1::GetStatusRequest *request,
@@ -91,8 +95,11 @@ public:
                 vektor::agent::v1::DeploymentRecord *response) override;
 
 private:
+  grpc::Status authorize(const grpc::ServerContext &context,
+                         AuthorizationAction action) const;
   const AgentStatusState &state_;
   AgentDeploymentState *deployment_state_{nullptr};
+  std::shared_ptr<const AuthorizationPolicy> authorization_;
 };
 
 class AgentRunner {
