@@ -91,7 +91,7 @@ The v0.7 trust milestone is complete. CI now verifies real Cosign signatures
 against an ephemeral OCI registry and proves that unsigned content, signatures
 checked with an untrusted key, and tags moved after signing all fail closed.
 
-## Current focus
+## Completed milestone
 
 ### v0.8 — Control
 
@@ -100,10 +100,10 @@ Add production access controls and operational safety boundaries.
 - [x] Role-based authorization for inspect, deploy, promote, and rollback
 - [x] Workload and fleet scopes derived from authenticated identity
 - [x] Approval policy for sensitive environments and large rollout waves
-- Credential and certificate rotation guidance
+- [x] Credential and certificate rotation guidance
 - [x] Stable, machine-readable authorization failures
 
-## Planned
+## Current focus
 
 ### v0.9 — Harden
 
@@ -115,11 +115,16 @@ Prove reliability under realistic fleet and failure conditions.
 - Upgrade, downgrade, backup, and recovery documentation
 - Release-candidate security review
 
+## Planned
+
 ### v1.0 — Production readiness
 
 Stable compatibility guarantees for the agent API, configuration schemas, CLI
 automation output, deployment state, and supported runtime-driver interface.
 
-The ordering may change when field testing reveals a higher-risk gap. With
-runtime reconciliation and artifact trust complete, v0.8 access control is the
-next milestone.
+The v0.8 control milestone is complete. VEKTOR now enforces identity-derived
+roles and resource scopes, gates sensitive waves with signed approvals, emits
+stable authorization failures, and documents safe credential rotation. The
+next focus is v0.9 production hardening.
+
+The ordering may change when field testing reveals a higher-risk gap.

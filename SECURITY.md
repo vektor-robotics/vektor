@@ -12,3 +12,9 @@ affected versions, impact, reproduction steps, and any suggested mitigation.
 
 Please allow the maintainers time to validate and coordinate a fix before public
 disclosure.
+
+## Operational credential security
+
+Use the [credential and certificate rotation runbook](docs/credential-rotation.md)
+for planned renewal, CA migration, signing-key changes, and emergency compromise
+response. VEKTOR does not currently live-reload agent-side TLS or trust policy.
