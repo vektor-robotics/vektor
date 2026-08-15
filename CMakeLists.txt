@@ -21,6 +21,7 @@ find_package(std_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
 set(VEKTOR_PROTO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/proto)
@@ -79,6 +80,7 @@ ament_target_dependencies(vektor_core
 )
 
 add_library(vektor_deployment
+  src/approval.cpp
   src/audit.cpp
   src/authorization.cpp
   src/deployment.cpp
@@ -89,7 +91,8 @@ target_include_directories(vektor_deployment PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(vektor_deployment vektor_proto yaml-cpp Threads::Threads)
+target_link_libraries(vektor_deployment vektor_proto yaml-cpp Threads::Threads
+  OpenSSL::Crypto)
 
 add_library(vektor_agent src/agent.cpp)
 target_include_directories(vektor_agent PUBLIC
@@ -182,6 +185,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_authorization vektor_agent vektor_deployment
     vektor_proto gRPC::grpc++)
 
+  ament_add_gtest(test_approval test/test_approval.cpp)
+  target_link_libraries(test_approval vektor_deployment OpenSSL::Crypto)
+
   ament_add_gtest(test_fleet test/test_fleet.cpp)
   target_link_libraries(test_fleet vektor_fleet vektor_agent vektor_proto
     gRPC::grpc++)
@@ -216,6 +222,7 @@ ament_export_dependencies(
   yaml-cpp
   Protobuf
   gRPC
+  OpenSSL
   Threads
 )
 ament_package()

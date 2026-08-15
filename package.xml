@@ -13,6 +13,7 @@
   <depend>tf2_ros</depend>
   <depend>lifecycle_msgs</depend>
   <depend>yaml-cpp</depend>
+  <depend>libssl-dev</depend>
   <depend>protobuf</depend>
   <depend>grpc</depend>
   <test_depend>ament_cmake_gtest</test_depend>

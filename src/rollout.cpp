@@ -1,5 +1,6 @@
 #include "vektor/rollout.hpp"
 
+#include "vektor/approval.hpp"
 #include "vektor/deployment.hpp"
 
 #include <grpcpp/grpcpp.h>
@@ -36,8 +37,10 @@ std::string require_string(const YAML::Node &node, const std::string &field) {
   if (!node || !node.IsScalar())
     invalid(field, "expected a non-empty string");
   const auto value = node.as<std::string>();
-  if (value.empty())
-    invalid(field, "must not be empty");
+  if (value.empty() || value.find('\0') != std::string::npos ||
+      value.find('\n') != std::string::npos ||
+      value.find('\r') != std::string::npos)
+    invalid(field, "must be a non-empty single-line string");
   return value;
 }
 
@@ -427,6 +430,25 @@ RolloutReport execute_wave(const RolloutConfig &config, StoredRollout &state,
 
   FleetConfig target_fleet = fleet;
   target_fleet.robots = robots;
+  if (config.approval_policy_path) {
+    const auto policy = load_approval_policy(*config.approval_policy_path);
+    report.approval_required =
+        approval_required(policy, config.environment, robots.size());
+    if (report.approval_required) {
+      try {
+        const ApprovalContext context{config.deployment_id, config.artifact,
+                                      fleet.fleet_id,       config.workload_id,
+                                      config.environment,   wave.name};
+        report.approvers = verify_approval_records(
+            policy, load_approval_records(*config.approval_file_path), context);
+      } catch (const std::exception &error) {
+        report.message = error.what();
+        if (!report.message.starts_with("VEKTOR_APPROVAL_REQUIRED:"))
+          report.message = "VEKTOR_APPROVAL_REQUIRED: " + report.message;
+        return report;
+      }
+    }
+  }
   const auto preflight = poll_fleet(target_fleet);
   if (!health_allowed(preflight.state, config.allow_degraded)) {
     report.message = "preflight health gate failed";
@@ -509,7 +531,8 @@ RolloutConfig load_rollout_config(const std::string &path) {
                  {"schema_version", "deployment_id", "workload_id", "artifact",
                   "fleet_config", "state_file", "operation_timeout_ms",
                   "readiness_timeout_ms", "settle_time_ms", "allow_degraded",
-                  "workload", "waves"},
+                  "environment", "approval_policy", "approval_file", "workload",
+                  "waves"},
                  "root");
   if (!root["schema_version"] || root["schema_version"].as<unsigned int>() != 1)
     invalid("schema_version", "must be 1");
@@ -522,6 +545,9 @@ RolloutConfig load_rollout_config(const std::string &path) {
                            : config.deployment_id;
   if (!is_valid_deployment_id(config.workload_id))
     invalid("workload_id", "use letters, numbers, '.', '_', or '-'");
+  config.environment = root["environment"]
+                           ? require_string(root["environment"], "environment")
+                           : "development";
   config.artifact = require_string(root["artifact"], "artifact");
   if (!is_pinned_oci_artifact(config.artifact))
     invalid("artifact", "must be pinned by a sha256 digest");
@@ -533,6 +559,17 @@ RolloutConfig load_rollout_config(const std::string &path) {
       root["state_file"]
           ? resolve_path(base, require_string(root["state_file"], "state_file"))
           : base / ".vektor" / (config.deployment_id + ".yaml");
+  if (static_cast<bool>(root["approval_policy"]) !=
+      static_cast<bool>(root["approval_file"]))
+    invalid("approval_policy",
+            "approval_policy and approval_file must be configured together");
+  if (root["approval_policy"]) {
+    config.approval_policy_path = resolve_path(
+        base, require_string(root["approval_policy"], "approval_policy"));
+    config.approval_file_path = resolve_path(
+        base, require_string(root["approval_file"], "approval_file"));
+    load_approval_policy(*config.approval_policy_path);
+  }
   const auto operation_timeout =
       root["operation_timeout_ms"]
           ? root["operation_timeout_ms"].as<long long>()
@@ -674,6 +711,19 @@ void print_rollout_report(const RolloutReport &report, std::ostream &out) {
   if (!report.wave.empty())
     out << "wave: " << report.wave << '\n';
   out << "message: " << report.message << '\n';
+  if (report.approval_required) {
+    out << "approval: required";
+    if (!report.approvers.empty()) {
+      out << " (";
+      for (std::size_t index = 0; index < report.approvers.size(); ++index) {
+        if (index > 0)
+          out << ", ";
+        out << report.approvers[index];
+      }
+      out << ')';
+    }
+    out << '\n';
+  }
   for (const auto &robot : report.robots)
     out << '[' << (robot.success ? "ok" : "failed") << "] " << robot.robot_id
         << " - " << robot.message
@@ -685,14 +735,22 @@ void print_rollout_report(const RolloutReport &report, std::ostream &out) {
 
 std::string rollout_report_to_json(const RolloutReport &report) {
   std::ostringstream out;
-  out << "{\"schema_version\":2,\"deployment_id\":"
+  out << "{\"schema_version\":3,\"deployment_id\":"
       << json_string(report.deployment_id)
       << ",\"action\":" << json_string(report.action)
       << ",\"wave\":" << json_string(report.wave)
       << ",\"success\":" << (report.success ? "true" : "false")
       << ",\"complete\":" << (report.complete ? "true" : "false")
       << ",\"next_wave\":" << report.next_wave
-      << ",\"message\":" << json_string(report.message) << ",\"robots\":[";
+      << ",\"message\":" << json_string(report.message)
+      << ",\"approval_required\":"
+      << (report.approval_required ? "true" : "false") << ",\"approvers\":[";
+  for (std::size_t index = 0; index < report.approvers.size(); ++index) {
+    if (index > 0)
+      out << ',';
+    out << json_string(report.approvers[index]);
+  }
+  out << "],\"robots\":[";
   for (std::size_t index = 0; index < report.robots.size(); ++index) {
     if (index > 0)
       out << ',';

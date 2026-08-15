@@ -1,0 +1,11 @@
+schema_version: 1
+sensitive_environments:
+  - production
+max_wave_size_without_approval: 5
+required_approvals: 2
+max_approval_lifetime_ms: 86400000
+approvers:
+  - identity: safety-lead
+    public_key: keys/safety-lead.pub.pem
+  - identity: fleet-owner
+    public_key: keys/fleet-owner.pub.pem

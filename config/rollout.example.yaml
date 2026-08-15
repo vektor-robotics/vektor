@@ -1,9 +1,12 @@
 schema_version: 1
 deployment_id: picker-2026-08-14
 workload_id: picker
+environment: production
 artifact: ghcr.io/vektor-robotics/picker@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 fleet_config: fleet.example.yaml
 state_file: ../.vektor/picker-2026-08-14.yaml
+approval_policy: approval-policy.example.yaml
+approval_file: approvals.example.yaml
 operation_timeout_ms: 300000
 readiness_timeout_ms: 30000
 settle_time_ms: 10000

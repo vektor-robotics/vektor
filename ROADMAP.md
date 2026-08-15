@@ -99,7 +99,7 @@ Add production access controls and operational safety boundaries.
 
 - [x] Role-based authorization for inspect, deploy, promote, and rollback
 - [x] Workload and fleet scopes derived from authenticated identity
-- Approval policy for sensitive environments and large rollout waves
+- [x] Approval policy for sensitive environments and large rollout waves
 - Credential and certificate rotation guidance
 - [x] Stable, machine-readable authorization failures
 

@@ -93,6 +93,9 @@ struct RolloutFiles {
   std::filesystem::path first_agent{"vektor_test_rollout_agent_1.yaml"};
   std::filesystem::path second_agent{"vektor_test_rollout_agent_2.yaml"};
   std::filesystem::path crash_copy{"vektor_test_rollout_agent_crash.yaml"};
+  std::filesystem::path approval_policy{
+      "vektor_test_rollout_approval_policy.yaml"};
+  std::filesystem::path approval_file{"vektor_test_rollout_approvals.yaml"};
 
   RolloutFiles() { cleanup(); }
   ~RolloutFiles() { cleanup(); }
@@ -104,6 +107,8 @@ struct RolloutFiles {
     std::filesystem::remove(first_agent);
     std::filesystem::remove(second_agent);
     std::filesystem::remove(crash_copy);
+    std::filesystem::remove(approval_policy);
+    std::filesystem::remove(approval_file);
   }
 };
 
@@ -413,7 +418,7 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
       vektor::rollout_report_to_json(deployed).find("\"action\":\"deploy\""),
       std::string::npos);
   EXPECT_NE(
-      vektor::rollout_report_to_json(deployed).find("\"schema_version\":2"),
+      vektor::rollout_report_to_json(deployed).find("\"schema_version\":3"),
       std::string::npos);
 
   auto stub = vektor::agent::v1::Agent::NewStub(
@@ -493,6 +498,40 @@ TEST(Rollout, TimesOutWithoutFreshPostActivationHealth) {
   EXPECT_EQ(deployed.robots.front().phase, "failed");
   EXPECT_EQ(first.deployment.current().phase,
             vektor::DeploymentPhase::RolledBack);
+}
+
+TEST(Rollout, DeniesRequiredApprovalBeforeAgentMutation) {
+  RolloutFiles files;
+  TestDeployAgent first("robot-1", files.first_agent);
+  TestDeployAgent second("robot-2", files.second_agent);
+  write_configs(files, first.port, second.port);
+  {
+    std::ofstream rollout(files.rollout, std::ios::app);
+    rollout << "environment: production\napproval_policy: "
+            << files.approval_policy.string()
+            << "\napproval_file: " << files.approval_file.string() << '\n';
+  }
+  {
+    std::ofstream policy(files.approval_policy);
+    policy << "schema_version: 1\nsensitive_environments: [production]\n"
+              "max_wave_size_without_approval: 100\nrequired_approvals: 1\n"
+              "approvers:\n  - identity: release-approver\n"
+              "    public_key: missing.pem\n";
+  }
+
+  const auto config = vektor::load_rollout_config(files.rollout.string());
+  const auto report = vektor::deploy_release(config);
+  EXPECT_FALSE(report.success);
+  EXPECT_TRUE(report.approval_required);
+  EXPECT_TRUE(report.approvers.empty());
+  EXPECT_TRUE(report.message.starts_with("VEKTOR_APPROVAL_REQUIRED:"));
+  EXPECT_NE(report.message.find("approval bundle"), std::string::npos);
+  EXPECT_EQ(first.backend->calls, 0);
+  EXPECT_EQ(second.backend->calls, 0);
+  EXPECT_FALSE(std::filesystem::exists(files.state));
+  const auto json = vektor::rollout_report_to_json(report);
+  EXPECT_NE(json.find("\"schema_version\":3"), std::string::npos);
+  EXPECT_NE(json.find("\"approval_required\":true"), std::string::npos);
 }
 
 TEST(RolloutIntegration,
