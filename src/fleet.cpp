@@ -146,7 +146,8 @@ std::string json_string(std::string_view value) {
 FleetRobotStatus
 poll_robot(const FleetRobotConfig &robot, std::chrono::milliseconds timeout,
            std::chrono::milliseconds max_snapshot_age,
-           const std::shared_ptr<grpc::ChannelCredentials> &credentials) {
+           const std::shared_ptr<grpc::ChannelCredentials> &credentials,
+           const std::string &fleet_id) {
   grpc::ChannelArguments arguments;
   if (!robot.tls_server_name.empty())
     arguments.SetSslTargetNameOverride(robot.tls_server_name);
@@ -156,6 +157,7 @@ poll_robot(const FleetRobotConfig &robot, std::chrono::milliseconds timeout,
   grpc::ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() + timeout);
   vektor::agent::v1::GetStatusRequest request;
+  request.mutable_scope()->set_fleet_id(fleet_id);
   vektor::agent::v1::StatusSnapshot response;
   const auto rpc = stub->GetStatus(&context, request, &response);
 
@@ -350,7 +352,7 @@ FleetReport poll_fleet(const FleetConfig &config,
   for (const auto &robot : selected) {
     pending.push_back(std::async(std::launch::async, [&, robot] {
       return poll_robot(robot, config.request_timeout, config.max_snapshot_age,
-                        credentials);
+                        credentials, config.fleet_id);
     }));
   }
 

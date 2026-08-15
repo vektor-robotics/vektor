@@ -35,6 +35,7 @@ struct AgentOptions {
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy_path;
   std::optional<std::filesystem::path> authorization_policy_path;
+  AuthorizationScope resource_scope;
 };
 
 void validate_agent_options(const AgentOptions &options);
@@ -68,7 +69,8 @@ public:
   explicit GrpcAgentService(const AgentStatusState &state);
   GrpcAgentService(
       const AgentStatusState &state, AgentDeploymentState &deployment_state,
-      std::shared_ptr<const AuthorizationPolicy> authorization = nullptr);
+      std::shared_ptr<const AuthorizationPolicy> authorization = nullptr,
+      AuthorizationScope resource_scope = {});
 
   grpc::Status GetStatus(grpc::ServerContext *context,
                          const vektor::agent::v1::GetStatusRequest *request,
@@ -96,10 +98,13 @@ public:
 
 private:
   grpc::Status authorize(const grpc::ServerContext &context,
-                         AuthorizationAction action) const;
+                         AuthorizationAction action,
+                         const vektor::agent::v1::AuthorizationScope &scope,
+                         bool require_workload) const;
   const AgentStatusState &state_;
   AgentDeploymentState *deployment_state_{nullptr};
   std::shared_ptr<const AuthorizationPolicy> authorization_;
+  AuthorizationScope resource_scope_;
 };
 
 class AgentRunner {

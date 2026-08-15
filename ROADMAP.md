@@ -98,7 +98,7 @@ checked with an untrusted key, and tags moved after signing all fail closed.
 Add production access controls and operational safety boundaries.
 
 - [x] Role-based authorization for inspect, deploy, promote, and rollback
-- Workload and fleet scopes derived from authenticated identity
+- [x] Workload and fleet scopes derived from authenticated identity
 - Approval policy for sensitive environments and large rollout waves
 - Credential and certificate rotation guidance
 - [x] Stable, machine-readable authorization failures

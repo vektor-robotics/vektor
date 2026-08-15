@@ -37,9 +37,18 @@ message StatusSnapshot {
   uint64 sequence = 9;
 }
 
-message GetStatusRequest {}
+message AuthorizationScope {
+  string fleet_id = 1;
+  string workload_id = 2;
+}
 
-message WatchStatusRequest {}
+message GetStatusRequest {
+  AuthorizationScope scope = 1;
+}
+
+message WatchStatusRequest {
+  AuthorizationScope scope = 1;
+}
 
 enum DeploymentPhase {
   DEPLOYMENT_PHASE_UNSPECIFIED = 0;
@@ -125,6 +134,7 @@ message PrepareDeploymentRequest {
   string artifact = 2;
   RuntimeWorkloadSpec workload = 3;
   int64 operation_timeout_ms = 4;
+  AuthorizationScope scope = 5;
 }
 
 message ActivateDeploymentRequest {
@@ -132,14 +142,18 @@ message ActivateDeploymentRequest {
   int64 operation_timeout_ms = 2;
   int64 readiness_timeout_ms = 3;
   bool allow_degraded = 4;
+  AuthorizationScope scope = 5;
 }
 
 message RollbackDeploymentRequest {
   string deployment_id = 1;
   int64 operation_timeout_ms = 2;
+  AuthorizationScope scope = 3;
 }
 
-message GetDeploymentRequest {}
+message GetDeploymentRequest {
+  AuthorizationScope scope = 1;
+}
 
 service Agent {
   rpc GetStatus(GetStatusRequest) returns (StatusSnapshot);

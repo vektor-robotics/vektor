@@ -1,13 +1,28 @@
-schema_version: 1
+schema_version: 2
 identities:
   - identity: release-manager
     roles:
       - deployer
+    scopes:
+      fleets:
+        - warehouse-prod
+      workloads:
+        - picker
 
   - identity: fleet-operator
     roles:
       - operator
+    scopes:
+      fleets:
+        - warehouse-prod
+      workloads:
+        - "*"
 
   - identity: fleet-observer
     roles:
       - viewer
+    scopes:
+      fleets:
+        - warehouse-prod
+      workloads:
+        - "*"

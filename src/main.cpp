@@ -23,6 +23,8 @@ struct CliOptions {
   std::string config_path;
   std::string format{"text"};
   std::string robot_id;
+  std::string fleet_id;
+  std::string workload_id;
   bool watch{false};
   bool history{true};
   std::chrono::milliseconds interval{5000};
@@ -63,6 +65,7 @@ struct CliOptions {
                "[--audit-log <path>] "
                "[--trust-policy <path>] "
                "[--authorization-policy <path>]\n"
+            << "                [--fleet-id <id> --workload-id <id>]\n"
             << "  vektor fleet  --config <path> [--format text|json] "
                "[--selector key=value]...\n"
             << "                [--limit <count>] [--watch] "
@@ -98,6 +101,10 @@ CliOptions parse_cli(int argc, char **argv) {
       options.format = next_value(index, argc, argv, argument);
     else if (argument == "--robot-id")
       options.robot_id = next_value(index, argc, argv, argument);
+    else if (argument == "--fleet-id")
+      options.fleet_id = next_value(index, argc, argv, argument);
+    else if (argument == "--workload-id")
+      options.workload_id = next_value(index, argc, argv, argument);
     else if (argument == "--watch")
       options.watch = true;
     else if (argument == "--interval-ms") {
@@ -165,9 +172,11 @@ CliOptions parse_cli(int argc, char **argv) {
   if (options.format != "text" && options.format != "json")
     usage_error("--format must be text or json");
   if (options.command == "check" &&
-      (options.watch || !options.robot_id.empty() || options.history_path ||
-       !options.history || options.insecure || options.tls_certificate ||
-       options.tls_private_key || options.tls_client_ca ||
+      (options.watch || !options.robot_id.empty() ||
+       !options.fleet_id.empty() || !options.workload_id.empty() ||
+       options.history_path || !options.history || options.insecure ||
+       options.tls_certificate || options.tls_private_key ||
+       options.tls_client_ca ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
@@ -177,7 +186,8 @@ CliOptions parse_cli(int argc, char **argv) {
        !options.selectors.empty() || options.limit))
     usage_error("status-only option used with check");
   if (options.command == "status" &&
-      (options.insecure || options.tls_certificate || options.tls_private_key ||
+      (!options.fleet_id.empty() || !options.workload_id.empty() ||
+       options.insecure || options.tls_certificate || options.tls_private_key ||
        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.audit_log != ".vektor/audit.jsonl" ||
@@ -190,9 +200,11 @@ CliOptions parse_cli(int argc, char **argv) {
        !options.selectors.empty() || options.limit))
     usage_error("status-only option used with agent");
   if (options.command == "fleet" &&
-      (!options.robot_id.empty() || options.history_path || !options.history ||
-       options.insecure || options.tls_certificate || options.tls_private_key ||
-       options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
+      (!options.robot_id.empty() || !options.fleet_id.empty() ||
+       !options.workload_id.empty() || options.history_path ||
+       !options.history || options.insecure || options.tls_certificate ||
+       options.tls_private_key || options.tls_client_ca ||
+       options.listen_address != "127.0.0.1:50051" ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.audit_log != ".vektor/audit.jsonl" ||
        options.oci_runtime != "docker" ||
@@ -203,10 +215,11 @@ CliOptions parse_cli(int argc, char **argv) {
                                options.command == "promote" ||
                                options.command == "rollback";
   if (rollout_command &&
-      (options.watch || !options.robot_id.empty() || options.history_path ||
-       !options.history || options.insecure || options.tls_certificate ||
-       options.tls_private_key || options.tls_client_ca ||
-       options.listen_address != "127.0.0.1:50051" ||
+      (options.watch || !options.robot_id.empty() ||
+       !options.fleet_id.empty() || !options.workload_id.empty() ||
+       options.history_path || !options.history || options.insecure ||
+       options.tls_certificate || options.tls_private_key ||
+       options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
        !options.selectors.empty() || options.limit ||
        options.deployment_state != ".vektor/deployment.yaml" ||
        options.audit_log != ".vektor/audit.jsonl" ||
@@ -286,6 +299,7 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   agent_options.runtime_container = options.runtime_container;
   agent_options.trust_policy_path = options.trust_policy;
   agent_options.authorization_policy_path = options.authorization_policy;
+  agent_options.resource_scope = {options.fleet_id, options.workload_id};
   const auto robot_id =
       options.robot_id.empty() ? config.robot_id : options.robot_id;
   return vektor::AgentRunner(node, config, robot_id, std::move(agent_options))

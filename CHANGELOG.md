@@ -41,6 +41,12 @@ All notable changes to VEKTOR are documented here.
   rollback RPCs, with pre-mutation enforcement and audited denials.
 - Stable JSON `VEKTOR_AUTHORIZATION_DENIED` error bodies carried by gRPC
   `PERMISSION_DENIED` responses.
+- Schema-2 authorization policies that bind authenticated identities to explicit
+  fleet and workload scopes, with exact matching or deliberate `*` wildcards.
+- Fleet and rollout clients propagate authorization scopes on every agent RPC,
+  including deployment-status recovery requests.
+- Agent-side fleet and workload bindings prevent callers from spoofing a scope
+  label that does not identify the agent's configured resource.
 
 ## [0.5.0] - 2026-08-14
 

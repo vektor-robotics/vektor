@@ -1,5 +1,6 @@
 schema_version: 1
 deployment_id: picker-2026-08-14
+workload_id: picker
 artifact: ghcr.io/vektor-robotics/picker@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 fleet_config: fleet.example.yaml
 state_file: ../.vektor/picker-2026-08-14.yaml

@@ -119,7 +119,8 @@ void write_configs(const RolloutFiles &files, int first_port, int second_port,
   fleet.close();
 
   std::ofstream rollout(files.rollout);
-  rollout << "schema_version: 1\ndeployment_id: release-1\nartifact: "
+  rollout << "schema_version: 1\ndeployment_id: release-1\nworkload_id: "
+             "picker\nartifact: "
           << kArtifact << "\nfleet_config: " << files.fleet.string()
           << "\nstate_file: " << files.state.string()
           << "\noperation_timeout_ms: 1000\nsettle_time_ms: 0\n"
@@ -395,6 +396,7 @@ TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   write_configs(files, first.port, second.port);
 
   const auto config = vektor::load_rollout_config(files.rollout.string());
+  EXPECT_EQ(config.workload_id, "picker");
   EXPECT_EQ(config.operation_timeout.count(), 1000);
   EXPECT_EQ(config.readiness_timeout.count(), 1000);
   EXPECT_EQ(config.workload.environment.at("ROS_DOMAIN_ID"), "42");

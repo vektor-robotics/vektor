@@ -67,7 +67,8 @@ ros2 run vektor vektor agent --config /etc/vektor/policy.yaml \
   --tls-cert /etc/vektor/tls/agent.crt \
   --tls-key /etc/vektor/tls/agent.key \
   --tls-ca /etc/vektor/tls/client-ca.crt \
-  --authorization-policy /etc/vektor/authorization.yaml
+  --authorization-policy /etc/vektor/authorization.yaml \
+  --fleet-id warehouse-prod --workload-id picker
 ```
 
 The first request may return gRPC `UNAVAILABLE` until initial ROS discovery and
@@ -83,14 +84,23 @@ must exactly match the peer identity selected by gRPC from the verified client
 certificate; audit records show the same value prefixed with `mtls:`.
 
 ```yaml
-schema_version: 1
+schema_version: 2
 identities:
   - identity: release-manager
     roles: [deployer]
+    scopes:
+      fleets: [warehouse-prod]
+      workloads: [picker]
   - identity: fleet-operator
     roles: [operator]
+    scopes:
+      fleets: [warehouse-prod]
+      workloads: ['*']
   - identity: fleet-observer
     roles: [viewer]
+    scopes:
+      fleets: [warehouse-prod]
+      workloads: ['*']
 ```
 
 | Role | Inspect | Deploy | Promote | Roll back |
@@ -110,8 +120,18 @@ identities:
 ```
 
 Denied requests are recorded as append-only `authorization.<action>` audit
-events. Omitting `--authorization-policy` preserves the pre-v0.8 behavior while
-operators migrate existing installations. See
+events. Schema 2 also requires each identity to declare non-empty `fleets` and
+`workloads` scopes. Values match exact fleet and workload IDs; use `'*'` only
+when deliberately granting every ID. Fleet status requests require a fleet
+match, while deployment inspection and mutation require both matches. The fleet
+ID comes from the fleet inventory and `workload_id` comes from rollout YAML.
+The agent must also be started with matching `--fleet-id` and `--workload-id`
+values whenever authorization is enabled. These server-bound IDs prevent a
+client from gaining access by claiming a different scope in its request.
+
+Schema-1 authorization files remain supported as role-only policies for a
+controlled migration. Omitting `--authorization-policy` preserves the pre-v0.8
+behavior while operators migrate existing installations. See
 `config/authorization.example.yaml` for a complete example.
 
 ## Fleet inventory and targeting
