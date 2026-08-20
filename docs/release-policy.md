@@ -22,6 +22,11 @@ backends. VEKTOR supports the current v1 minor release on that platform; CI
 tests this target for every pull request. Other operating systems, ROS
 distributions, and OCI runtimes may work but are not release-qualified.
 
+Before each release candidate, run `bash scripts/qualify-oci-runtime.sh docker`
+and, where Podman is supported by the intended fleet, the same command with
+`podman`. The runner pulls a public digest-pinned Alpine image and creates then
+removes only a uniquely named `vektor-runtime-it-*` test container.
+
 ## Release checklist
 
 1. Ensure all v1 compatibility fixtures, Jazzy tests, and artifact-trust CI

@@ -134,7 +134,8 @@ automation output, deployment state, and supported runtime-driver interface.
 - [x] Define JSON output compatibility fixtures for check, status, fleet, and
   rollout CLI commands
 - [x] Define the v1 release/versioning and support policy
-- Qualify supported OCI-runtime and ROS 2 Jazzy upgrade paths
+- [x] Automate qualification of digest-pinned OCI runtime activation and the
+  ROS 2 Jazzy upgrade path; run Docker and Podman evidence for each candidate
 
 The v0.8 control milestone is complete. VEKTOR now enforces identity-derived
 roles and resource scopes, gates sensitive waves with signed approvals, emits

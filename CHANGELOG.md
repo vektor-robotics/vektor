@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Opt-in real OCI runtime-driver qualification for digest-pinned Docker and
+  Podman workloads on Ubuntu 24.04 / ROS 2 Jazzy.
 - v1.0.0 release metadata, an enforced CMake/package version match, and a
   supported-platform, versioning, and security-fix policy.
 - Schema-versioned `check --format json` output and golden fixtures for all

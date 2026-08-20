@@ -11,6 +11,8 @@ endif()
 
 option(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS
   "Run real Cosign tests against a prepared OCI registry" OFF)
+option(VEKTOR_ENABLE_OCI_RUNTIME_INTEGRATION_TESTS
+  "Run real Docker or Podman runtime-driver tests" OFF)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 20)
@@ -209,6 +211,11 @@ if(BUILD_TESTING)
   if(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS)
     ament_add_gtest(test_trust_integration test/test_trust_integration.cpp)
     target_link_libraries(test_trust_integration vektor_deployment)
+  endif()
+
+  if(VEKTOR_ENABLE_OCI_RUNTIME_INTEGRATION_TESTS)
+    ament_add_gtest(test_runtime_integration test/test_runtime_integration.cpp)
+    target_link_libraries(test_runtime_integration vektor_deployment)
   endif()
 
   ament_add_gtest(test_audit test/test_audit.cpp)
