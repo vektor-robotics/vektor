@@ -1,8 +1,10 @@
 # VEKTOR roadmap
 
 VEKTOR is building a trustworthy software-delivery control plane for autonomous
-machines. Near-term work prioritizes closing the deployment loop before adding
-the controls required for production adoption.
+machines. The v1 engineering foundation is complete: health-aware delivery,
+runtime reconciliation, artifact trust, access control, fault hardening, and
+stable compatibility contracts. Post-v1 work prioritizes operability on real
+robots, multiple workloads per machine, and evidence-backed fleet scale.
 
 ## Released
 
@@ -103,19 +105,17 @@ Add production access controls and operational safety boundaries.
 - [x] Credential and certificate rotation guidance
 - [x] Stable, machine-readable authorization failures
 
-## Current focus
+## Completed milestone
 
 ### v0.9 — Harden
 
 Prove reliability under realistic fleet and failure conditions.
 
 - [x] Repeated crash-recovery fault-injection test and timed soak harness
-- Multi-day soak campaign execution and evidence review (procedure and
-  evidence-review checklist are ready)
+- [x] Multi-day soak procedure and evidence-review checklist
 - [x] Bound fleet polling fan-out and preserve deterministic reports at scale
 - [x] Bound rollout orchestration fan-out with the fleet concurrency limit
-- Execute and review scale and performance baselines for fleet polling and
-  rollout orchestration (reproducible harness is ready)
+- [x] Reproducible fleet polling and rollout performance-baseline harness
 - [x] Deployment-state migration tests for every supported legacy schema
 - [x] API wire-contract and configuration/state migration tests
 - [x] Upgrade, downgrade, backup, and recovery documentation
@@ -140,9 +140,129 @@ automation output, deployment state, and supported runtime-driver interface.
 The v1.0 production-readiness engineering milestone is complete. VEKTOR now
 defines stable v1 contracts for gRPC, configuration, CLI JSON, persisted state,
 and extension interfaces; enforces aligned release metadata; and provides real
-OCI runtime qualification on Ubuntu 24.04 / ROS 2 Jazzy.
+OCI runtime qualification automation for Ubuntu 24.04 / ROS 2 Jazzy.
 
-Before tagging a v1 release, complete the v0.9 multi-day soak and real-fleet
-scale evidence review, plus Podman qualification where it is a target runtime.
+## v1.0 release qualification gate
 
-The ordering may change when field testing reveals a higher-risk gap.
+Engineering completion is not release evidence. Before creating the `v1.0.0`
+tag, complete and archive the following against the exact candidate commit:
+
+- [ ] Pass a continuous 72-hour rollout soak on dedicated Ubuntu 24.04 / ROS 2
+  Jazzy test hardware with no ignored or retried failures
+- [ ] Record fleet polling baselines for 25, 100, and the largest intended
+  inventory, including cap `1` and the intended production concurrency cap
+- [ ] Record complete canary and larger-wave rollout baselines against an
+  isolated registry and disposable fleet
+- [ ] Pass digest-pinned runtime qualification for Docker and for Podman when
+  Podman is a supported target
+- [ ] Review the retained state, audit logs, JSON reports, CSV samples, and
+  environment metadata; link the accepted evidence from the release record
+- [ ] Finalize the changelog, create the signed `v1.0.0` tag, and publish release
+  artifacts according to `docs/release-policy.md`
+
+These are release-owner activities, not blockers for post-v1 development. A
+failed gate remains visible and must not be converted into a checked item by
+rerunning past the first failure.
+
+## Current focus
+
+### v1.1 — Operate
+
+Make VEKTOR straightforward to install, supervise, diagnose, and upgrade on a
+real robot without requiring a source checkout.
+
+- [ ] Produce versioned Ubuntu 24.04 packages and a hardened `systemd` agent
+  service with explicit state, audit, policy, and credential paths
+- [ ] Add an offline `vektor validate` command for health, fleet, rollout,
+  authorization, approval, and trust configuration
+- [ ] Add transactional agent policy reload with validation, audit events, and
+  automatic retention of the last known-good configuration
+- [ ] Export bounded operational metrics for agent health, reconciliation,
+  authorization denials, rollout outcomes, and RPC latency
+- [ ] Add a redacted support-bundle command that collects versions,
+  configuration fingerprints, status, and recent diagnostics without private
+  keys or secret values
+- [ ] Qualify clean install, reboot recovery, package upgrade, package rollback,
+  and uninstall behavior in CI or disposable Ubuntu VMs
+
+Definition of done: an operator can install a signed package on a clean Jazzy
+machine, start VEKTOR as a least-privilege service, validate and safely reload
+policy, observe its health, collect a redacted diagnostic bundle, and complete
+an upgrade and rollback without losing deployment or audit state.
+
+## Next
+
+### v1.2 — Multi-workload
+
+Remove the one-managed-container-per-agent limit while preserving independent
+health gates and rollback boundaries.
+
+- [ ] Introduce stable workload identities and per-workload desired, observed,
+  previous, reconciliation, and audit state
+- [ ] Extend authorization and rollout targeting so one identity can receive
+  different roles and scopes for different workloads on the same robot
+- [ ] Reconcile, inspect, deploy, and roll back named workloads independently
+  without restarting or mutating unaffected workloads
+- [ ] Add CPU, memory, and runtime resource limits to the strict workload spec
+- [ ] Migrate existing single-workload state without manual edits or loss of the
+  previous rollback target
+- [ ] Add crash, drift, partial-failure, and concurrent-rollout integration
+  coverage for at least three workloads per agent
+
+Definition of done: a fleet can independently roll out and roll back three
+named workloads per robot while preserving v1 single-workload behavior and
+keeping unaffected workloads available.
+
+### v1.3 — Observe and scale
+
+Reduce control-plane cost and make large-fleet behavior explainable before
+increasing default scale targets.
+
+- [ ] Reuse gRPC channels and add bounded retry backoff and jitter for watch and
+  rollout operations
+- [ ] Add incremental fleet status streaming so unchanged robots do not require
+  a full reconnect and report on every watch interval
+- [ ] Export fleet and rollout events to an operator-selected durable sink while
+  retaining the local append-only audit source of truth
+- [ ] Add latency, error-rate, saturation, and stale-snapshot summaries with
+  stable machine-readable output
+- [ ] Add deterministic benchmark scenarios at 100, 500, and 1,000 simulated
+  agents, followed by evidence runs at each claimed production scale
+- [ ] Publish capacity guidance for concurrency, deadlines, watch intervals,
+  control-plane CPU/memory, and expected network load
+
+Definition of done: VEKTOR has a documented, reproducible fleet-size envelope;
+operators can identify why a rollout is slow or blocked without collecting logs
+manually from every robot.
+
+## Later
+
+### v1.4 — Runtime and inventory ecosystem
+
+- Package and qualify additional runtime-driver implementations without
+  weakening the v1 extension contract
+- Support dynamic inventory providers alongside strict static YAML inventory
+- Define policy-controlled rollout hooks for site-specific preflight and
+  post-deployment checks
+- Publish reference integrations and conformance tests for third-party drivers
+  and inventory providers
+
+### v2.0 — Persistent control plane
+
+Evaluate a long-running, highly available control plane only after field use
+validates the requirements. Candidate scope includes declarative desired state,
+durable rollout scheduling, fleet-wide event indexing, operator workflows, and
+an API/UI. Agents must remain offline-safe, fail closed, and usable directly
+when the control plane is unavailable.
+
+## Prioritization rules
+
+- Safety, rollback correctness, and compatibility take priority over feature
+  count or benchmark headline numbers.
+- Every claimed platform, runtime, and fleet-size envelope requires retained,
+  reproducible evidence.
+- New centralized components must not remove local agent autonomy or require
+  internet connectivity for safe operation.
+- A milestone may change when design-partner use reveals a higher-risk gap, but
+  its compatibility and migration impact must be documented before
+  implementation.
