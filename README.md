@@ -179,7 +179,9 @@ transport:
 
 Relative certificate paths resolve from the inventory file. Optional
 `tls_server_name` on a robot supports certificate identities that differ from
-the endpoint hostname.
+the endpoint hostname. See the
+[credential and certificate rotation runbook](docs/credential-rotation.md)
+before renewing a leaf, changing an identity, or replacing a CA.
 
 ## Health-gated deployments
 
@@ -393,6 +395,7 @@ config/example.yaml   Example health policy
 config/fleet.example.yaml  Example fleet inventory
 config/rollout.example.yaml  Example staged OCI rollout
 config/approval-policy.example.yaml  Example rollout approval policy
+docs/credential-rotation.md  Operator credential and certificate rotation runbook
 test/                 GoogleTest coverage
 ```
 
@@ -482,13 +485,16 @@ completed v0.6 Reconcile: applying the desired artifact to the actual machine
 runtime, verifying the observed digest and health, detecting drift, and safely
 recovering or rolling back after failures. VEKTOR has also completed v0.7 Trust:
 artifact identity, policy enforcement, provenance, auditability, and real OCI
-negative integration coverage. The current focus is v0.8 Control, followed by
-production hardening in v0.9. See `ROADMAP.md`.
+negative integration coverage. VEKTOR has also completed v0.8 Control: scoped
+authorization, signed approvals, stable denial responses, and credential
+rotation guidance. The current focus is v0.9 production hardening. See
+`ROADMAP.md`.
 
 ## Contributing and security
 
-Contributions are welcome. See `CONTRIBUTING.md` for the development workflow and
-`SECURITY.md` for private vulnerability reporting guidance.
+Contributions are welcome. See `CONTRIBUTING.md` for the development workflow,
+`SECURITY.md` for private vulnerability reporting guidance, and
+`docs/credential-rotation.md` for operational key and certificate rotation.
 
 ## License
 

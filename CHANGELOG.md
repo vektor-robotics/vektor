@@ -53,6 +53,8 @@ All notable changes to VEKTOR are documented here.
   environment, and wave before target-wave polling or agent mutation.
 - Rollout JSON schema v3 fields for approval requirements and verified
   approver identities.
+- An operator runbook for routine and emergency rotation of mutual-TLS
+  certificates, authorization identities, approval keys, and Cosign trust.
 
 ## [0.5.0] - 2026-08-14
 
