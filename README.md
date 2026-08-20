@@ -493,10 +493,11 @@ completed v0.6 Reconcile: applying the desired artifact to the actual machine
 runtime, verifying the observed digest and health, detecting drift, and safely
 recovering or rolling back after failures. VEKTOR has also completed v0.7 Trust:
 artifact identity, policy enforcement, provenance, auditability, and real OCI
-negative integration coverage. VEKTOR has also completed v0.8 Control: scoped
-authorization, signed approvals, stable denial responses, and credential
-rotation guidance. The current focus is v0.9 production hardening. See
-`ROADMAP.md`.
+negative integration coverage. VEKTOR has also completed v0.8 Control, v0.9
+Harden, and the v1.0 compatibility engineering milestone. The current product
+focus is v1.1 Operate: installable packages, service supervision, safe policy
+reload, operational metrics, and redacted diagnostics. Release qualification
+evidence remains a separate gate before the `v1.0.0` tag. See `ROADMAP.md`.
 
 ## Contributing and security
 
