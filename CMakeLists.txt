@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
-project(vektor)
+project(vektor VERSION 1.0.0)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" VEKTOR_PACKAGE_XML)
+string(REGEX MATCH "<version>([^<]+)</version>" _ "${VEKTOR_PACKAGE_XML}")
+if(NOT CMAKE_MATCH_1 STREQUAL PROJECT_VERSION)
+  message(FATAL_ERROR
+    "package.xml version '${CMAKE_MATCH_1}' must match CMake project version "
+    "'${PROJECT_VERSION}'")
+endif()
 
 option(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS
   "Run real Cosign tests against a prepared OCI registry" OFF)

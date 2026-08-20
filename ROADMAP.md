@@ -133,7 +133,7 @@ automation output, deployment state, and supported runtime-driver interface.
   configuration without breaking unversioned deployments
 - [x] Define JSON output compatibility fixtures for check, status, fleet, and
   rollout CLI commands
-- Define the v1 release/versioning and support policy
+- [x] Define the v1 release/versioning and support policy
 - Qualify supported OCI-runtime and ROS 2 Jazzy upgrade paths
 
 The v0.8 control milestone is complete. VEKTOR now enforces identity-derived

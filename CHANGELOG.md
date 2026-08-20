@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- v1.0.0 release metadata, an enforced CMake/package version match, and a
+  supported-platform, versioning, and security-fix policy.
 - Schema-versioned `check --format json` output and golden fixtures for all
   machine-readable check, status, fleet, and rollout command responses.
 - v1 compatibility contract covering gRPC, YAML, CLI JSON, persisted state,

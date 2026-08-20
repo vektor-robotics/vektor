@@ -2,7 +2,11 @@
 
 ## Supported versions
 
-VEKTOR is pre-1.0. Security fixes are applied to the latest tagged release.
+VEKTOR supports the latest v1 minor release on Ubuntu 24.04 with ROS 2 Jazzy.
+Security fixes are applied to the latest v1 release; supported users should
+upgrade to the newest patch release promptly. A security fix for an older v1
+minor release may be issued when the remediation cannot be safely upgraded,
+but that is an exception rather than a guarantee.
 
 ## Reporting a vulnerability
 
