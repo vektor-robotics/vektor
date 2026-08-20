@@ -116,7 +116,8 @@ void write_configs(const RolloutFiles &files, int first_port, int second_port,
                    bool single_wave = false) {
   std::ofstream fleet(files.fleet);
   fleet << "fleet_id: test-fleet\nrequest_timeout_ms: 1000\n"
-        << "max_snapshot_age_ms: 5000\ntransport:\n  insecure: true\n"
+        << "max_snapshot_age_ms: 5000\nmax_concurrent_requests: 1\n"
+        << "transport:\n  insecure: true\n"
         << "robots:\n  - id: robot-1\n    endpoint: 127.0.0.1:" << first_port
         << "\n    labels:\n      ring: canary\n"
         << "  - id: robot-2\n    endpoint: 127.0.0.1:" << second_port
@@ -607,6 +608,46 @@ TEST(RolloutIntegration,
   EXPECT_EQ(stable.runtime->observation().artifact, kPreviousArtifact);
   EXPECT_TRUE(canary.runtime->observation().ready);
   EXPECT_TRUE(stable.runtime->observation().ready);
+}
+
+TEST(RolloutIntegration, RepeatedCrashRecoveryRemainsConvergent) {
+  RolloutFiles files;
+  auto activation_log = std::make_shared<ActivationLog>();
+  RestartableDeployAgent agent("robot-1", files.first_agent, activation_log);
+  install_previous_release(agent);
+
+  constexpr auto kCycles = 12U;
+  for (auto cycle = 0U; cycle < kCycles; ++cycle) {
+    const auto deployment_id = "soak-release-" + std::to_string(cycle);
+    const auto artifact = cycle % 2 == 0 ? kArtifact : kPreviousArtifact;
+    agent.deployment->prepare(deployment_id, artifact);
+    agent.runtime->set_on_activate([&] {
+      std::filesystem::copy_file(
+          files.first_agent, files.crash_copy,
+          std::filesystem::copy_options::overwrite_existing);
+      agent.publish_healthy();
+    });
+    agent.deployment->activate(deployment_id);
+
+    agent.stop();
+    std::filesystem::copy_file(files.crash_copy, files.first_agent,
+                               std::filesystem::copy_options::overwrite_existing);
+    const auto recovered = agent.restart_and_recover();
+    EXPECT_EQ(recovered.phase, vektor::DeploymentPhase::Staged) << cycle;
+    EXPECT_EQ(recovered.operation, vektor::ReconciliationOperation::None)
+        << cycle;
+    EXPECT_NE(recovered.message.find("retry activation"), std::string::npos)
+        << cycle;
+
+    agent.runtime->set_on_activate([&] { agent.publish_healthy(); });
+    const auto active = agent.deployment->activate(deployment_id);
+    EXPECT_EQ(active.phase, vektor::DeploymentPhase::Active) << cycle;
+    EXPECT_EQ(active.artifact, artifact) << cycle;
+
+    const auto restarted = agent.restart_and_recover();
+    EXPECT_EQ(restarted.phase, vektor::DeploymentPhase::Active) << cycle;
+    EXPECT_FALSE(restarted.drift_detected) << cycle;
+  }
 }
 
 TEST(RolloutIntegration, RuntimeTimeoutRollsBackEntireTwoRobotWave) {

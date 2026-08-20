@@ -34,6 +34,9 @@ struct FleetConfig {
   std::string fleet_id;
   std::chrono::milliseconds request_timeout{2000};
   std::chrono::milliseconds max_snapshot_age{15000};
+  // Bound client-side fan-out so large inventories cannot create one thread
+  // per robot. Requests within a batch still run concurrently.
+  std::size_t max_concurrent_requests{32};
   FleetTransportConfig transport;
   std::vector<FleetRobotConfig> robots;
 };

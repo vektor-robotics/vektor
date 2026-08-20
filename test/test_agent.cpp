@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <google/protobuf/descriptor.h>
+
 #include <filesystem>
 #include <future>
 #include <memory>
@@ -139,6 +141,34 @@ TEST(AgentProto, PreservesSnapshotFields) {
   ASSERT_EQ(proto.checks_size(), 1);
   EXPECT_EQ(proto.checks(0).status(), vektor::agent::v1::CHECK_STATUS_WARN);
   EXPECT_EQ(proto.checks(0).duration_ms(), 12);
+}
+
+TEST(AgentApiCompatibility, PreservesV1WireContract) {
+  const auto *snapshot =
+      vektor::agent::v1::StatusSnapshot::descriptor();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_EQ(snapshot->FindFieldByName("schema_version")->number(), 1);
+  EXPECT_EQ(snapshot->FindFieldByName("robot_id")->number(), 3);
+  EXPECT_EQ(snapshot->FindFieldByName("checks")->number(), 8);
+  EXPECT_EQ(snapshot->FindFieldByName("sequence")->number(), 9);
+
+  const auto *deployment =
+      vektor::agent::v1::DeploymentRecord::descriptor();
+  ASSERT_NE(deployment, nullptr);
+  EXPECT_EQ(deployment->FindFieldByName("schema_version")->number(), 1);
+  EXPECT_EQ(deployment->FindFieldByName("artifact")->number(), 3);
+  EXPECT_EQ(deployment->FindFieldByName("reconciliation_operation")->number(),
+            19);
+  EXPECT_EQ(deployment->FindFieldByName("verified_at")->number(), 26);
+
+  const auto *service = google::protobuf::DescriptorPool::generated_pool()
+                            ->FindServiceByName("vektor.agent.v1.Agent");
+  ASSERT_NE(service, nullptr);
+  ASSERT_EQ(service->method_count(), 6);
+  EXPECT_EQ(service->method(0)->name(), "GetStatus");
+  EXPECT_EQ(service->method(1)->name(), "WatchStatus");
+  EXPECT_TRUE(service->method(1)->server_streaming());
+  EXPECT_EQ(service->method(5)->name(), "GetDeployment");
 }
 
 TEST(AgentGrpc, ServesLatestSnapshot) {

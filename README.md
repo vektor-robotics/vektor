@@ -162,10 +162,14 @@ ros2 run vektor vektor fleet --config config/fleet.example.yaml \
   --watch --interval-ms 5000
 ```
 
-Fleet requests run concurrently with the configured per-agent deadline. A robot
+Fleet requests run concurrently with the configured per-agent deadline, bounded
+by `max_concurrent_requests` (default `32`) to keep large inventories from
+creating one client thread per robot. Results remain in inventory order. A robot
 is reported as `unreachable` when its RPC fails, times out, or returns a snapshot
 older than `max_snapshot_age_ms`. Unsupported schemas and identity mismatches are
 `unhealthy`, preventing accidental targeting of incompatible or wrong machines.
+The same limit bounds concurrent rollout RPCs for preparation, activation,
+observation, and rollback.
 The command exits `1` when any selected robot is unhealthy or unreachable.
 
 For production, replace `insecure: true` with shared mutual-TLS client settings:
@@ -295,6 +299,10 @@ activation.
 The current runtime implementation supports one managed container per agent.
 Its workload specification is persisted alongside the artifact, and rollback
 restores the previous artifact, workload settings, and verification provenance.
+See the [rollout soak and fault-injection guide](docs/soak-testing.md) for the
+repeatable multi-day release-candidate campaign.
+For agent replacement and incident handling, use the
+[upgrade, downgrade, backup, and recovery runbook](docs/upgrade-recovery.md).
 
 ### Artifact trust
 
@@ -495,6 +503,9 @@ rotation guidance. The current focus is v0.9 production hardening. See
 Contributions are welcome. See `CONTRIBUTING.md` for the development workflow,
 `SECURITY.md` for private vulnerability reporting guidance, and
 `docs/credential-rotation.md` for operational key and certificate rotation.
+For release qualification, see the [soak-testing](docs/soak-testing.md),
+[scale-baseline](docs/scale-baselines.md), and
+[upgrade/recovery](docs/upgrade-recovery.md) runbooks.
 
 ## License
 

@@ -6,6 +6,22 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Bounded fleet polling concurrency with deterministic inventory-order reports,
+  including strict configuration validation for large-inventory operation.
+- Applied the fleet concurrency limit to rollout preparation, activation,
+  observation, and rollback RPCs.
+- Upgrade fixtures for deployment-state schemas 1 through 4, proving safe
+  re-observation and migration to the current persisted schema.
+- Repeated crash-recovery rollout testing and a timed, release-candidate soak
+  harness for multi-day fault-injection campaigns.
+- An operator runbook for safe agent upgrades, compatible-state downgrades,
+  restricted backups, and failure recovery.
+- Bounded captured OCI runtime output to 64 KiB, preventing noisy local runtime
+  failures from exhausting agent memory.
+- Protobuf v1 wire-contract tests and a CSV performance-baseline harness for
+  fleet polling and disposable rollout qualification.
+- Release-candidate evidence procedures for multi-day soak campaigns and fleet
+  and rollout scale baselines.
 - Versioned runtime-driver interface with an initial Docker/Podman backend.
 - Managed-container activation, observation, stop, and rollback operations.
 - Persistent desired and observed artifact state, runtime ID, and drift status.

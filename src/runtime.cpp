@@ -31,7 +31,18 @@ struct CommandResult {
   int exit_code;
   std::string output;
   bool timed_out{false};
+  bool output_truncated{false};
 };
+
+constexpr std::size_t kMaximumRuntimeOutputBytes = 64 * 1024;
+
+void append_bounded_output(std::string &output, bool &truncated,
+                           const char *data, std::size_t count) {
+  const auto remaining = kMaximumRuntimeOutputBytes - output.size();
+  const auto appended = std::min(count, remaining);
+  output.append(data, appended);
+  truncated = truncated || appended != count;
+}
 
 std::string trim(std::string value) {
   const auto whitespace = [](unsigned char character) {
@@ -100,6 +111,7 @@ CommandResult run_command(const std::string &executable,
   if (flags >= 0)
     fcntl(output_pipe[0], F_SETFL, flags | O_NONBLOCK);
   std::string output;
+  bool output_truncated = false;
   std::array<char, 4096> buffer{};
   int status = 0;
   bool exited = false;
@@ -109,7 +121,8 @@ CommandResult run_command(const std::string &executable,
     for (;;) {
       const auto count = read(output_pipe[0], buffer.data(), buffer.size());
       if (count > 0) {
-        output.append(buffer.data(), static_cast<std::size_t>(count));
+        append_bounded_output(output, output_truncated, buffer.data(),
+                              static_cast<std::size_t>(count));
         continue;
       }
       if (count < 0 && errno == EINTR)
@@ -140,7 +153,8 @@ CommandResult run_command(const std::string &executable,
   for (;;) {
     const auto count = read(output_pipe[0], buffer.data(), buffer.size());
     if (count > 0) {
-      output.append(buffer.data(), static_cast<std::size_t>(count));
+      append_bounded_output(output, output_truncated, buffer.data(),
+                            static_cast<std::size_t>(count));
       continue;
     }
     if (count < 0 && errno == EINTR)
@@ -149,7 +163,7 @@ CommandResult run_command(const std::string &executable,
   }
   close(output_pipe[0]);
   const int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128;
-  return {exit_code, trim(std::move(output)), timed_out};
+  return {exit_code, trim(std::move(output)), timed_out, output_truncated};
 }
 
 void require_success(const CommandResult &result, std::string_view operation) {
@@ -162,7 +176,10 @@ void require_success(const CommandResult &result, std::string_view operation) {
                           ? "exit code " + std::to_string(result.exit_code)
                           : result.output;
   throw std::runtime_error("OCI runtime " + std::string(operation) +
-                           " failed: " + detail);
+                           " failed: " + detail +
+                           (result.output_truncated
+                                ? "\n[OCI runtime output truncated]"
+                                : ""));
 }
 
 std::chrono::milliseconds

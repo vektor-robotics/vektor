@@ -109,11 +109,18 @@ Add production access controls and operational safety boundaries.
 
 Prove reliability under realistic fleet and failure conditions.
 
-- Multi-day soak tests and restart/fault injection
-- Scale and performance baselines for fleet polling and rollout orchestration
-- API and configuration migration tests
-- Upgrade, downgrade, backup, and recovery documentation
-- Release-candidate security review
+- [x] Repeated crash-recovery fault-injection test and timed soak harness
+- Multi-day soak campaign execution and evidence review (procedure and
+  evidence-review checklist are ready)
+- [x] Bound fleet polling fan-out and preserve deterministic reports at scale
+- [x] Bound rollout orchestration fan-out with the fleet concurrency limit
+- Execute and review scale and performance baselines for fleet polling and
+  rollout orchestration (reproducible harness is ready)
+- [x] Deployment-state migration tests for every supported legacy schema
+- [x] API wire-contract and configuration/state migration tests
+- [x] Upgrade, downgrade, backup, and recovery documentation
+- [x] Release-candidate security review: bounded runtime output, argument-vector
+  execution, mTLS authorization, and durable audit-path checks
 
 ## Planned
 

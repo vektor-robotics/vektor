@@ -391,16 +391,24 @@ std::vector<RolloutRobotResult>
 call_agents(const FleetConfig &fleet,
             const std::vector<FleetRobotConfig> &robots,
             const RolloutConfig &rollout, RpcAction action) {
-  std::vector<std::future<RolloutRobotResult>> pending;
-  pending.reserve(robots.size());
-  for (const auto &robot : robots)
-    pending.push_back(std::async(std::launch::async, [&, robot] {
-      return call_agent(fleet, robot, rollout, action);
-    }));
   std::vector<RolloutRobotResult> results;
-  results.reserve(pending.size());
-  for (auto &request : pending)
-    results.push_back(request.get());
+  results.reserve(robots.size());
+  const auto concurrency = std::max<std::size_t>(
+      1, fleet.max_concurrent_requests);
+  for (std::size_t offset = 0; offset < robots.size(); offset += concurrency) {
+    const auto end = std::min(robots.size(), offset + concurrency);
+    std::vector<std::future<RolloutRobotResult>> pending;
+    pending.reserve(end - offset);
+    for (std::size_t index = offset; index < end; ++index) {
+      const auto robot = robots[index];
+      pending.push_back(std::async(std::launch::async, [&, robot] {
+        return call_agent(fleet, robot, rollout, action);
+      }));
+    }
+    // Preserve inventory order in reports and cap concurrent agent mutations.
+    for (auto &request : pending)
+      results.push_back(request.get());
+  }
   return results;
 }
 
