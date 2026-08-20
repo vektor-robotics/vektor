@@ -43,6 +43,7 @@ TEST(FleetConfig, ParsesInventoryAndLabels) {
   std::ofstream file(path);
   file << "fleet_id: test-fleet\nrequest_timeout_ms: 750\n"
        << "max_snapshot_age_ms: 30000\n"
+       << "max_concurrent_requests: 7\n"
        << "transport:\n  insecure: true\nrobots:\n"
        << "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n"
        << "    labels:\n      site: berlin\n      ring: canary\n";
@@ -52,9 +53,32 @@ TEST(FleetConfig, ParsesInventoryAndLabels) {
   EXPECT_EQ(config.fleet_id, "test-fleet");
   EXPECT_EQ(config.request_timeout.count(), 750);
   EXPECT_EQ(config.max_snapshot_age.count(), 30000);
+  EXPECT_EQ(config.max_concurrent_requests, 7U);
   ASSERT_EQ(config.robots.size(), 1U);
   EXPECT_EQ(config.robots.front().labels.at("ring"), "canary");
   std::remove(path.c_str());
+}
+
+TEST(FleetConfig, DefaultsAndRejectsInvalidConcurrency) {
+  const auto default_path = std::string("vektor_default_fleet.yaml");
+  {
+    std::ofstream file(default_path);
+    file << "fleet_id: test-fleet\ntransport:\n  insecure: true\nrobots:\n"
+         << "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n";
+  }
+  EXPECT_EQ(vektor::load_fleet_config(default_path).max_concurrent_requests,
+            32U);
+  std::remove(default_path.c_str());
+
+  const auto invalid_path = std::string("vektor_invalid_concurrency.yaml");
+  {
+    std::ofstream file(invalid_path);
+    file << "fleet_id: test-fleet\nmax_concurrent_requests: 0\n"
+            "transport:\n  insecure: true\nrobots:\n"
+         << "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n";
+  }
+  EXPECT_THROW(vektor::load_fleet_config(invalid_path), std::runtime_error);
+  std::remove(invalid_path.c_str());
 }
 
 TEST(FleetConfig, RejectsInsecureNonLoopbackEndpoint) {
@@ -106,6 +130,7 @@ TEST(FleetPolling, AggregatesConcurrentAgentResponses) {
   vektor::FleetConfig config;
   config.fleet_id = "test-fleet";
   config.request_timeout = std::chrono::milliseconds(1000);
+  config.max_concurrent_requests = 1;
   config.transport.insecure = true;
   config.robots = {
       {"robot-1",

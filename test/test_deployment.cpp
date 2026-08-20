@@ -139,6 +139,55 @@ TEST(Deployment, PersistsPrepareActivateAndRollback) {
   std::filesystem::remove(path);
 }
 
+TEST(Deployment, MigratesLegacyPersistedStateSchemas) {
+  const auto path = std::filesystem::path("vektor_test_deployment_legacy.yaml");
+  const auto fingerprint = vektor::workload_fingerprint(vektor::WorkloadSpec{});
+  const auto workload =
+      "  network: host\n  restart_policy: unless-stopped\n"
+      "  environment: {}\n  mounts: []\n  devices: []\n  command: []\n";
+
+  for (const auto schema_version : {1U, 2U, 3U, 4U}) {
+    std::filesystem::remove(path);
+    std::ofstream file(path);
+    file << "schema_version: " << schema_version << "\n"
+         << "deployment_id: release-1\nartifact: " << kArtifact << "\n"
+         << "previous_artifact: ''\n";
+    if (schema_version >= 2) {
+      file << "observed_artifact: " << kArtifact << "\n"
+           << "runtime_id: container-123\nruntime_running: true\n"
+           << "drift_detected: false\n";
+    }
+    if (schema_version >= 3) {
+      file << "workload:\n" << workload << "previous_workload:\n"
+           << workload << "observed_workload_fingerprint: " << fingerprint
+           << "\n";
+    }
+    if (schema_version >= 4) {
+      file << "runtime_ready: true\nruntime_readiness_status: none\n"
+           << "reconciliation_operation: none\noperation_started_at: ''\n"
+           << "operation_attempt: 0\n";
+    }
+    file << "phase: active\nmessage: legacy state\n"
+         << "updated_at: 2026-08-14T12:00:00Z\n";
+    file.close();
+
+    auto runtime = std::make_shared<FakeRuntime>();
+    runtime->observation = {true, true, kArtifact, "container-123", true,
+                            fingerprint, "none"};
+    vektor::AgentDeploymentState state(path, runtime);
+    const auto migrated = state.refresh_observed();
+    EXPECT_EQ(migrated.phase, vektor::DeploymentPhase::Active);
+    EXPECT_FALSE(migrated.drift_detected);
+    EXPECT_EQ(migrated.operation, vektor::ReconciliationOperation::None);
+
+    std::ifstream persisted(path);
+    const std::string contents((std::istreambuf_iterator<char>(persisted)),
+                               std::istreambuf_iterator<char>());
+    EXPECT_NE(contents.find("schema_version: 5"), std::string::npos);
+  }
+  std::filesystem::remove(path);
+}
+
 TEST(Deployment, RecordsBackendFailure) {
   const auto path =
       std::filesystem::path("vektor_test_deployment_failure.yaml");
@@ -597,6 +646,36 @@ TEST(Runtime, OciDriverBoundsCommands) {
 
   std::filesystem::remove(executable);
   std::filesystem::remove(state);
+}
+
+TEST(Runtime, OciDriverBoundsCapturedFailureOutput) {
+  const auto executable = std::filesystem::path("vektor_noisy_runtime.sh");
+  std::filesystem::remove(executable);
+  {
+    std::ofstream script(executable);
+    script << "#!/bin/sh\n"
+              "case \"$1\" in\n"
+              "  pull) dd if=/dev/zero bs=65536 count=2 2>/dev/null | "
+              "tr '\\000' X; exit 1 ;;\n"
+              "  *) exit 2 ;;\n"
+              "esac\n";
+  }
+  std::filesystem::permissions(executable,
+                               std::filesystem::perms::owner_all |
+                                   std::filesystem::perms::group_read |
+                                   std::filesystem::perms::group_exec);
+
+  vektor::OciRuntimeDriver driver("./" + executable.string(), "workload");
+  try {
+    driver.prepare(kArtifact);
+    FAIL() << "expected noisy runtime failure";
+  } catch (const std::runtime_error &error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("output truncated"), std::string::npos);
+    EXPECT_LT(message.size(), 66000U);
+  }
+
+  std::filesystem::remove(executable);
 }
 
 TEST(Runtime, OciDriverWaitsForContainerHealth) {

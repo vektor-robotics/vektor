@@ -211,7 +211,7 @@ FleetConfig load_fleet_config(const std::string &path) {
   }
   reject_unknown(root,
                  {"fleet_id", "request_timeout_ms", "max_snapshot_age_ms",
-                  "transport", "robots"},
+                  "max_concurrent_requests", "transport", "robots"},
                  "root");
 
   FleetConfig config;
@@ -228,6 +228,12 @@ FleetConfig load_fleet_config(const std::string &path) {
   if (max_age <= 0)
     invalid("max_snapshot_age_ms", "must be greater than zero");
   config.max_snapshot_age = std::chrono::milliseconds(max_age);
+  const auto max_concurrent = root["max_concurrent_requests"]
+                                  ? root["max_concurrent_requests"].as<long long>()
+                                  : 32;
+  if (max_concurrent <= 0)
+    invalid("max_concurrent_requests", "must be greater than zero");
+  config.max_concurrent_requests = static_cast<std::size_t>(max_concurrent);
 
   const auto transport = root["transport"];
   reject_unknown(
@@ -347,22 +353,30 @@ FleetReport poll_fleet(const FleetConfig &config,
                        std::optional<std::size_t> limit) {
   const auto selected = select_fleet_robots(config, selectors, limit);
   const auto credentials = channel_credentials(config.transport);
-  std::vector<std::future<FleetRobotStatus>> pending;
-  pending.reserve(selected.size());
-  for (const auto &robot : selected) {
-    pending.push_back(std::async(std::launch::async, [&, robot] {
-      return poll_robot(robot, config.request_timeout, config.max_snapshot_age,
-                        credentials, config.fleet_id);
-    }));
-  }
-
   FleetReport report;
   report.timestamp = utc_timestamp();
   report.fleet_id = config.fleet_id;
   report.inventory_size = config.robots.size();
-  report.robots.reserve(pending.size());
-  for (auto &future : pending)
-    report.robots.push_back(future.get());
+  report.robots.reserve(selected.size());
+  const auto concurrency = std::max<std::size_t>(1, config.max_concurrent_requests);
+  for (std::size_t offset = 0; offset < selected.size();
+       offset += concurrency) {
+    const auto end = std::min(selected.size(), offset + concurrency);
+    std::vector<std::future<FleetRobotStatus>> pending;
+    pending.reserve(end - offset);
+    for (std::size_t index = offset; index < end; ++index) {
+      const auto robot = selected[index];
+      pending.push_back(std::async(std::launch::async, [&, robot] {
+        return poll_robot(robot, config.request_timeout,
+                          config.max_snapshot_age, credentials,
+                          config.fleet_id);
+      }));
+    }
+    // Futures are collected in inventory order, keeping reports deterministic
+    // while limiting the number of outstanding RPCs.
+    for (auto &future : pending)
+      report.robots.push_back(future.get());
+  }
   report.state = aggregate_fleet_state(report.robots);
   return report;
 }
