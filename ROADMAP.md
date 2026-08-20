@@ -131,7 +131,8 @@ automation output, deployment state, and supported runtime-driver interface.
 
 - [x] Publish the v1 compatibility contract and version legacy health/fleet
   configuration without breaking unversioned deployments
-- Define JSON output compatibility fixtures for every CLI command
+- [x] Define JSON output compatibility fixtures for check, status, fleet, and
+  rollout CLI commands
 - Define the v1 release/versioning and support policy
 - Qualify supported OCI-runtime and ROS 2 Jazzy upgrade paths
 

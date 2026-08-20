@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Schema-versioned `check --format json` output and golden fixtures for all
+  machine-readable check, status, fleet, and rollout command responses.
 - v1 compatibility contract covering gRPC, YAML, CLI JSON, persisted state,
   and extension-interface support windows.
 - Optional schema-1 markers for health and fleet YAML, retaining support for

@@ -20,7 +20,7 @@ TEST(Status, DerivesFleetHealthStates) {
             vektor::HealthState::Unhealthy);
 }
 
-TEST(Status, SerializesStableJsonSchema) {
+TEST(CliJsonContract, StatusOutputMatchesV1GoldenFixture) {
   vektor::StatusSnapshot snapshot;
   snapshot.timestamp = "2026-08-14T12:00:00Z";
   snapshot.robot_id = "robot-01";
@@ -32,10 +32,14 @@ TEST(Status, SerializesStableJsonSchema) {
                              "node is present", std::chrono::milliseconds(2)});
 
   const auto json = vektor::status_to_json(snapshot);
-  EXPECT_NE(json.find("\"schema_version\":1"), std::string::npos);
-  EXPECT_NE(json.find("\"robot_id\":\"robot-01\""), std::string::npos);
-  EXPECT_NE(json.find("\"state\":\"healthy\""), std::string::npos);
-  EXPECT_NE(json.find("\"duration_ms\":125"), std::string::npos);
+  EXPECT_EQ(
+      json,
+      "{\"schema_version\":1,\"timestamp\":\"2026-08-14T12:00:00Z\","
+      "\"robot_id\":\"robot-01\",\"hostname\":\"edge-host\","
+      "\"ros_domain_id\":7,\"state\":\"healthy\",\"duration_ms\":125,"
+      "\"checks\":[{\"status\":\"pass\",\"category\":\"node\","
+      "\"target\":\"/planner\",\"message\":\"node is present\","
+      "\"duration_ms\":2}]}");
 }
 
 TEST(Status, KeepsOnlyMostRecentHistoryEntries) {

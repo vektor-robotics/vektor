@@ -68,7 +68,7 @@ void print_results_json(const std::vector<CheckResult> &results,
       ++failed;
   }
 
-  out << "{\"ok\":" << (failed == 0 ? "true" : "false")
+  out << "{\"schema_version\":1,\"ok\":" << (failed == 0 ? "true" : "false")
       << ",\"summary\":{\"pass\":" << passed << ",\"warn\":" << warned
       << ",\"fail\":" << failed << "},\"checks\":[";
   for (std::size_t index = 0; index < results.size(); ++index) {

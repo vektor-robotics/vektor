@@ -142,6 +142,32 @@ TEST(FleetHealth, UnreachableTakesAggregatePrecedence) {
             vektor::HealthState::Unreachable);
 }
 
+TEST(CliJsonContract, FleetOutputMatchesV1GoldenFixture) {
+  vektor::FleetReport report;
+  report.timestamp = "2026-08-20T12:00:00Z";
+  report.fleet_id = "warehouse-a";
+  report.state = vektor::HealthState::Degraded;
+  report.inventory_size = 3;
+  report.robots = {
+      vektor::FleetRobotStatus{
+          {"robot-1", "127.0.0.1:50051", {{"ring", "canary"}}},
+          vektor::HealthState::Healthy, std::nullopt, ""},
+      vektor::FleetRobotStatus{
+          {"robot-2", "127.0.0.1:50052", {{"ring", "stable"}}},
+          vektor::HealthState::Degraded, std::nullopt, "slow"}};
+
+  EXPECT_EQ(
+      vektor::fleet_report_to_json(report),
+      "{\"schema_version\":1,\"timestamp\":\"2026-08-20T12:00:00Z\","
+      "\"fleet_id\":\"warehouse-a\",\"state\":\"degraded\","
+      "\"inventory_size\":3,\"target_count\":2,\"robots\":["
+      "{\"id\":\"robot-1\",\"endpoint\":\"127.0.0.1:50051\","
+      "\"state\":\"healthy\",\"labels\":{\"ring\":\"canary\"}},"
+      "{\"id\":\"robot-2\",\"endpoint\":\"127.0.0.1:50052\","
+      "\"state\":\"degraded\",\"labels\":{\"ring\":\"stable\"},"
+      "\"error\":\"slow\"}]}");
+}
+
 TEST(FleetPolling, AggregatesConcurrentAgentResponses) {
   TestAgent first("robot-1", vektor::HealthState::Healthy);
   TestAgent second("robot-2", vektor::HealthState::Degraded);

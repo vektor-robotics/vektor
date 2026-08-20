@@ -19,9 +19,10 @@ guide.
 | Trust and approval YAML | explicit schema 1 | 1 | n/a |
 | Runtime, verifier, audit interfaces | `interface_version() == 1` | 1 | 1 |
 
-All machine-readable CLI output includes a `schema_version`. Consumers must
-ignore unknown JSON fields and reject an unsupported schema version. Operators
-should preserve deployment state before upgrades and follow the
+All machine-readable CLI output includes a `schema_version`: check/status/fleet
+use schema 1 and rollout operations use schema 3. Consumers must ignore unknown
+JSON fields and reject an unsupported schema version. Operators should preserve
+deployment state before upgrades and follow the
 [upgrade/recovery runbook](upgrade-recovery.md) for downgrade or recovery.
 
 The protobuf descriptor and configuration compatibility behavior are covered by
