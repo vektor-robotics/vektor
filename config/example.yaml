@@ -1,4 +1,5 @@
 # VEKTOR milestone 1 health policy.
+schema_version: 1
 robot_id: robot-001
 discovery_timeout_ms: 750
 

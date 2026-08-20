@@ -81,6 +81,27 @@ TEST(FleetConfig, DefaultsAndRejectsInvalidConcurrency) {
   std::remove(invalid_path.c_str());
 }
 
+TEST(FleetConfig, AcceptsLegacyUnversionedFilesAndRejectsFutureSchemas) {
+  const auto legacy_path = std::string("vektor_legacy_fleet.yaml");
+  {
+    std::ofstream file(legacy_path);
+    file << "fleet_id: legacy-fleet\ntransport:\n  insecure: true\nrobots:\n"
+            "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n";
+  }
+  EXPECT_NO_THROW(vektor::load_fleet_config(legacy_path));
+  std::remove(legacy_path.c_str());
+
+  const auto future_path = std::string("vektor_future_fleet.yaml");
+  {
+    std::ofstream file(future_path);
+    file << "schema_version: 2\nfleet_id: future-fleet\ntransport:\n"
+            "  insecure: true\nrobots:\n"
+            "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n";
+  }
+  EXPECT_THROW(vektor::load_fleet_config(future_path), std::runtime_error);
+  std::remove(future_path.c_str());
+}
+
 TEST(FleetConfig, RejectsInsecureNonLoopbackEndpoint) {
   const auto path = std::string("vektor_invalid_fleet.yaml");
   std::ofstream file(path);

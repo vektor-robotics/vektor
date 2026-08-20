@@ -129,6 +129,12 @@ Prove reliability under realistic fleet and failure conditions.
 Stable compatibility guarantees for the agent API, configuration schemas, CLI
 automation output, deployment state, and supported runtime-driver interface.
 
+- [x] Publish the v1 compatibility contract and version legacy health/fleet
+  configuration without breaking unversioned deployments
+- Define JSON output compatibility fixtures for every CLI command
+- Define the v1 release/versioning and support policy
+- Qualify supported OCI-runtime and ROS 2 Jazzy upgrade paths
+
 The v0.8 control milestone is complete. VEKTOR now enforces identity-derived
 roles and resource scopes, gates sensitive waves with signed approvals, emits
 stable authorization failures, and documents safe credential rotation. The

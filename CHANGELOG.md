@@ -6,6 +6,10 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- v1 compatibility contract covering gRPC, YAML, CLI JSON, persisted state,
+  and extension-interface support windows.
+- Optional schema-1 markers for health and fleet YAML, retaining support for
+  existing unversioned configuration files and failing closed on future schemas.
 - Bounded fleet polling concurrency with deterministic inventory-order reports,
   including strict configuration validation for large-inventory operation.
 - Applied the fleet concurrency limit to rollout preparation, activation,

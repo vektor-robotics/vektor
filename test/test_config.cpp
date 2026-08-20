@@ -7,7 +7,7 @@
 TEST(Config, ParsesAllRequirementTypes) {
   const auto path = std::string("vektor_test_config.yaml");
   std::ofstream file(path);
-  file << "robot_id: test-robot\ndiscovery_timeout_ms: 250\n"
+  file << "schema_version: 1\nrobot_id: test-robot\ndiscovery_timeout_ms: 250\n"
        << "required_nodes: [/planner]\n"
        << "required_topics:\n  - name: /cmd_vel\n    min_frequency_hz: 5\n"
        << "    sample_window_ms: 200\n    reliability: best_effort\n    "
@@ -31,6 +31,24 @@ TEST(Config, ParsesAllRequirementTypes) {
   EXPECT_EQ(config.lifecycle.front().service_timeout.count(), 400);
   EXPECT_EQ(config.lifecycle.front().request_timeout.count(), 500);
   std::remove(path.c_str());
+}
+
+TEST(Config, AcceptsLegacyUnversionedFilesAndRejectsFutureSchemas) {
+  const auto legacy_path = std::string("vektor_legacy_config.yaml");
+  {
+    std::ofstream file(legacy_path);
+    file << "robot_id: legacy-robot\nrequired_nodes: [/planner]\n";
+  }
+  EXPECT_NO_THROW(vektor::load_config(legacy_path));
+  std::remove(legacy_path.c_str());
+
+  const auto future_path = std::string("vektor_future_config.yaml");
+  {
+    std::ofstream file(future_path);
+    file << "schema_version: 2\nrobot_id: future-robot\n";
+  }
+  EXPECT_THROW(vektor::load_config(future_path), std::runtime_error);
+  std::remove(future_path.c_str());
 }
 
 TEST(Config, RejectsInvalidFrequencyRange) {

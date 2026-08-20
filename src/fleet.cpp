@@ -210,10 +210,13 @@ FleetConfig load_fleet_config(const std::string &path) {
                              "': " + error.what());
   }
   reject_unknown(root,
-                 {"fleet_id", "request_timeout_ms", "max_snapshot_age_ms",
+                 {"schema_version", "fleet_id", "request_timeout_ms", "max_snapshot_age_ms",
                   "max_concurrent_requests", "transport", "robots"},
                  "root");
 
+  if (root["schema_version"] &&
+      root["schema_version"].as<unsigned int>() != 1)
+    invalid("schema_version", "must be 1");
   FleetConfig config;
   config.fleet_id = require_string(root["fleet_id"], "fleet_id");
   const auto timeout = root["request_timeout_ms"]
