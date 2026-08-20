@@ -1,8 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
-project(vektor)
+project(vektor VERSION 1.0.0)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" VEKTOR_PACKAGE_XML)
+string(REGEX MATCH "<version>([^<]+)</version>" _ "${VEKTOR_PACKAGE_XML}")
+if(NOT CMAKE_MATCH_1 STREQUAL PROJECT_VERSION)
+  message(FATAL_ERROR
+    "package.xml version '${CMAKE_MATCH_1}' must match CMake project version "
+    "'${PROJECT_VERSION}'")
+endif()
 
 option(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS
   "Run real Cosign tests against a prepared OCI registry" OFF)
+option(VEKTOR_ENABLE_OCI_RUNTIME_INTEGRATION_TESTS
+  "Run real Docker or Podman runtime-driver tests" OFF)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 20)
@@ -201,6 +211,11 @@ if(BUILD_TESTING)
   if(VEKTOR_ENABLE_TRUST_INTEGRATION_TESTS)
     ament_add_gtest(test_trust_integration test/test_trust_integration.cpp)
     target_link_libraries(test_trust_integration vektor_deployment)
+  endif()
+
+  if(VEKTOR_ENABLE_OCI_RUNTIME_INTEGRATION_TESTS)
+    ament_add_gtest(test_runtime_integration test/test_runtime_integration.cpp)
+    target_link_libraries(test_runtime_integration vektor_deployment)
   endif()
 
   ament_add_gtest(test_audit test/test_audit.cpp)

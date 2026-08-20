@@ -6,6 +6,16 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Opt-in real OCI runtime-driver qualification for digest-pinned Docker and
+  Podman workloads on Ubuntu 24.04 / ROS 2 Jazzy.
+- v1.0.0 release metadata, an enforced CMake/package version match, and a
+  supported-platform, versioning, and security-fix policy.
+- Schema-versioned `check --format json` output and golden fixtures for all
+  machine-readable check, status, fleet, and rollout command responses.
+- v1 compatibility contract covering gRPC, YAML, CLI JSON, persisted state,
+  and extension-interface support windows.
+- Optional schema-1 markers for health and fleet YAML, retaining support for
+  existing unversioned configuration files and failing closed on future schemas.
 - Bounded fleet polling concurrency with deterministic inventory-order reports,
   including strict configuration validation for large-inventory operation.
 - Applied the fleet concurrency limit to rollout preparation, activation,

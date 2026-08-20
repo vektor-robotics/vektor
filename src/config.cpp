@@ -68,13 +68,16 @@ CheckConfig load_config(const std::string &path) {
     invalid("root", "expected a mapping");
 
   static const std::set<std::string> allowed_keys{
-      "robot_id",        "discovery_timeout_ms", "required_nodes",
+      "schema_version",  "robot_id",        "discovery_timeout_ms", "required_nodes",
       "required_topics", "required_tf",          "lifecycle"};
   for (const auto &entry : root) {
     const auto key = entry.first.as<std::string>();
     if (!allowed_keys.contains(key))
       invalid(key, "unknown top-level field");
   }
+  if (const auto schema_version = root["schema_version"];
+      schema_version && schema_version.as<unsigned int>() != 1)
+    invalid("schema_version", "must be 1");
   CheckConfig config;
 
   if (const auto robot_id = root["robot_id"]; robot_id)

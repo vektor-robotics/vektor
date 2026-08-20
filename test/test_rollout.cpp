@@ -393,6 +393,30 @@ TEST(Rollout, RejectsRobotInMultipleWaves) {
                std::runtime_error);
 }
 
+TEST(CliJsonContract, RolloutOutputMatchesV3GoldenFixture) {
+  vektor::RolloutReport report;
+  report.deployment_id = "release-42";
+  report.action = "deploy";
+  report.wave = "canary";
+  report.success = true;
+  report.complete = false;
+  report.next_wave = 1;
+  report.message = "wave deployed";
+  report.approval_required = true;
+  report.approvers = {"release@example.com"};
+  report.robots = {{"robot-1", true, "active", "active", "none"}};
+
+  EXPECT_EQ(
+      vektor::rollout_report_to_json(report),
+      "{\"schema_version\":3,\"deployment_id\":\"release-42\","
+      "\"action\":\"deploy\",\"wave\":\"canary\",\"success\":true,"
+      "\"complete\":false,\"next_wave\":1,\"message\":\"wave deployed\","
+      "\"approval_required\":true,\"approvers\":[\"release@example.com\"],"
+      "\"robots\":[{\"id\":\"robot-1\",\"success\":true,"
+      "\"message\":\"active\",\"phase\":\"active\","
+      "\"operation\":\"none\"}]}");
+}
+
 TEST(Rollout, DeploysPromotesAndRollsBackTwoWaves) {
   RolloutFiles files;
   TestDeployAgent first("robot-1", files.first_agent);

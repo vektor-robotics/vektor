@@ -505,7 +505,10 @@ Contributions are welcome. See `CONTRIBUTING.md` for the development workflow,
 `docs/credential-rotation.md` for operational key and certificate rotation.
 For release qualification, see the [soak-testing](docs/soak-testing.md),
 [scale-baseline](docs/scale-baselines.md), and
-[upgrade/recovery](docs/upgrade-recovery.md) runbooks.
+[upgrade/recovery](docs/upgrade-recovery.md) runbooks. The stable public
+interface commitments are documented in the [v1 compatibility
+contract](docs/compatibility.md). The supported platform, versioning rules, and
+release procedure are in the [v1 release policy](docs/release-policy.md).
 
 ## License
 

@@ -81,6 +81,27 @@ TEST(FleetConfig, DefaultsAndRejectsInvalidConcurrency) {
   std::remove(invalid_path.c_str());
 }
 
+TEST(FleetConfig, AcceptsLegacyUnversionedFilesAndRejectsFutureSchemas) {
+  const auto legacy_path = std::string("vektor_legacy_fleet.yaml");
+  {
+    std::ofstream file(legacy_path);
+    file << "fleet_id: legacy-fleet\ntransport:\n  insecure: true\nrobots:\n"
+            "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n";
+  }
+  EXPECT_NO_THROW(vektor::load_fleet_config(legacy_path));
+  std::remove(legacy_path.c_str());
+
+  const auto future_path = std::string("vektor_future_fleet.yaml");
+  {
+    std::ofstream file(future_path);
+    file << "schema_version: 2\nfleet_id: future-fleet\ntransport:\n"
+            "  insecure: true\nrobots:\n"
+            "  - id: robot-1\n    endpoint: 127.0.0.1:50051\n";
+  }
+  EXPECT_THROW(vektor::load_fleet_config(future_path), std::runtime_error);
+  std::remove(future_path.c_str());
+}
+
 TEST(FleetConfig, RejectsInsecureNonLoopbackEndpoint) {
   const auto path = std::string("vektor_invalid_fleet.yaml");
   std::ofstream file(path);
@@ -119,6 +140,32 @@ TEST(FleetHealth, UnreachableTakesAggregatePrecedence) {
   robots[2].state = vektor::HealthState::Unreachable;
   EXPECT_EQ(vektor::aggregate_fleet_state(robots),
             vektor::HealthState::Unreachable);
+}
+
+TEST(CliJsonContract, FleetOutputMatchesV1GoldenFixture) {
+  vektor::FleetReport report;
+  report.timestamp = "2026-08-20T12:00:00Z";
+  report.fleet_id = "warehouse-a";
+  report.state = vektor::HealthState::Degraded;
+  report.inventory_size = 3;
+  report.robots = {
+      vektor::FleetRobotStatus{
+          {"robot-1", "127.0.0.1:50051", {{"ring", "canary"}}},
+          vektor::HealthState::Healthy, std::nullopt, ""},
+      vektor::FleetRobotStatus{
+          {"robot-2", "127.0.0.1:50052", {{"ring", "stable"}}},
+          vektor::HealthState::Degraded, std::nullopt, "slow"}};
+
+  EXPECT_EQ(
+      vektor::fleet_report_to_json(report),
+      "{\"schema_version\":1,\"timestamp\":\"2026-08-20T12:00:00Z\","
+      "\"fleet_id\":\"warehouse-a\",\"state\":\"degraded\","
+      "\"inventory_size\":3,\"target_count\":2,\"robots\":["
+      "{\"id\":\"robot-1\",\"endpoint\":\"127.0.0.1:50051\","
+      "\"state\":\"healthy\",\"labels\":{\"ring\":\"canary\"}},"
+      "{\"id\":\"robot-2\",\"endpoint\":\"127.0.0.1:50052\","
+      "\"state\":\"degraded\",\"labels\":{\"ring\":\"stable\"},"
+      "\"error\":\"slow\"}]}");
 }
 
 TEST(FleetPolling, AggregatesConcurrentAgentResponses) {

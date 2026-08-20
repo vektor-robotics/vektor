@@ -12,7 +12,7 @@ TEST(Reporter, ProducesMachineReadableJson) {
   vektor::print_results_json(results, output);
   EXPECT_EQ(
       output.str(),
-      "{\"ok\":false,\"summary\":{\"pass\":1,\"warn\":0,\"fail\":1},\"checks\":"
+      "{\"schema_version\":1,\"ok\":false,\"summary\":{\"pass\":1,\"warn\":0,\"fail\":1},\"checks\":"
       "["
       "{\"status\":\"pass\",\"category\":\"node\",\"target\":\"/planner\","
       "\"message\":\"node is present\"},"

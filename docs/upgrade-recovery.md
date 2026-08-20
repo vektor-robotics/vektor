@@ -52,6 +52,15 @@ rewritten as schema 5 when state next persists. Retain the pre-upgrade backup
 until the fleet has completed its post-upgrade observation and a canary rollout
 has passed.
 
+For a release candidate, run the real runtime-driver qualification on the same
+Ubuntu 24.04 / Jazzy image used by the target fleet:
+
+```bash
+bash scripts/qualify-oci-runtime.sh docker
+# Run this as well when Podman is a supported target runtime.
+bash scripts/qualify-oci-runtime.sh podman
+```
+
 ## Downgrade procedure
 
 An older VEKTOR binary may not understand a newer persisted deployment schema.

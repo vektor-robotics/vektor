@@ -122,16 +122,27 @@ Prove reliability under realistic fleet and failure conditions.
 - [x] Release-candidate security review: bounded runtime output, argument-vector
   execution, mTLS authorization, and durable audit-path checks
 
-## Planned
+## Completed milestone
 
 ### v1.0 — Production readiness
 
 Stable compatibility guarantees for the agent API, configuration schemas, CLI
 automation output, deployment state, and supported runtime-driver interface.
 
-The v0.8 control milestone is complete. VEKTOR now enforces identity-derived
-roles and resource scopes, gates sensitive waves with signed approvals, emits
-stable authorization failures, and documents safe credential rotation. The
-next focus is v0.9 production hardening.
+- [x] Publish the v1 compatibility contract and version legacy health/fleet
+  configuration without breaking unversioned deployments
+- [x] Define JSON output compatibility fixtures for check, status, fleet, and
+  rollout CLI commands
+- [x] Define the v1 release/versioning and support policy
+- [x] Automate qualification of digest-pinned OCI runtime activation and the
+  ROS 2 Jazzy upgrade path; run Docker and Podman evidence for each candidate
+
+The v1.0 production-readiness engineering milestone is complete. VEKTOR now
+defines stable v1 contracts for gRPC, configuration, CLI JSON, persisted state,
+and extension interfaces; enforces aligned release metadata; and provides real
+OCI runtime qualification on Ubuntu 24.04 / ROS 2 Jazzy.
+
+Before tagging a v1 release, complete the v0.9 multi-day soak and real-fleet
+scale evidence review, plus Podman qualification where it is a target runtime.
 
 The ordering may change when field testing reveals a higher-risk gap.
