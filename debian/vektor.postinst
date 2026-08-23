@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+if [ "$1" = configure ]; then
+  if ! getent group vektor >/dev/null; then
+    addgroup --system vektor
+  fi
+  if ! getent passwd vektor >/dev/null; then
+    adduser --system --ingroup vektor --home /var/lib/vektor \
+      --no-create-home --shell /usr/sbin/nologin vektor
+  fi
+  install -d -o vektor -g vektor -m 0750 /var/lib/vektor /var/log/vektor \
+    /var/log/vektor/ros
+  install -d -o root -g vektor -m 0750 /etc/vektor/tls
+  chown root:vektor /etc/vektor/agent.env /etc/vektor/policy.yaml \
+    /etc/vektor/trust.yaml /etc/vektor/authorization.yaml
+  chmod 0640 /etc/vektor/agent.env /etc/vektor/policy.yaml \
+    /etc/vektor/trust.yaml /etc/vektor/authorization.yaml
+fi
+
+#DEBHELPER#

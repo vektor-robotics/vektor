@@ -1,0 +1,7 @@
+# Install the production artifact-trust policy before enabling the agent.
+schema_version: 1
+mode: keyless
+certificate_identity: replace-with-release-identity
+certificate_oidc_issuer: https://token.actions.githubusercontent.com
+cosign_executable: cosign
+timeout_ms: 30000

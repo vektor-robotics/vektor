@@ -236,6 +236,10 @@ if(BUILD_TESTING)
       --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml)
   set_tests_properties(test_validate_cli_rejects_unknown_type PROPERTIES
     WILL_FAIL TRUE)
+
+  add_test(NAME test_ubuntu_packaging
+    COMMAND ${CMAKE_COMMAND} -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/verify_ubuntu_packaging.cmake)
 endif()
 
 ament_export_include_directories(include)

@@ -38,6 +38,30 @@ jobs:
           colcon test --packages-select vektor --event-handlers console_direct+
           colcon test-result --verbose
 
+  ubuntu-package:
+    name: Ubuntu 24.04 package
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base-noble
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install package build dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y debhelper devscripts ros-dev-tools libyaml-cpp-dev \
+            libprotobuf-dev protobuf-compiler libgrpc++-dev protobuf-compiler-grpc
+          rosdep update
+          rosdep install --from-paths . --ignore-src -r -y --skip-keys grpc
+
+      - name: Build Debian package
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          dpkg-buildpackage -us -uc -b
+
   artifact-trust:
     name: Real OCI artifact trust
     runs-on: ubuntu-24.04

@@ -171,7 +171,7 @@ rerunning past the first failure.
 Make VEKTOR straightforward to install, supervise, diagnose, and upgrade on a
 real robot without requiring a source checkout.
 
-- [ ] Produce versioned Ubuntu 24.04 packages and a hardened `systemd` agent
+- [x] Produce versioned Ubuntu 24.04 packages and a hardened `systemd` agent
   service with explicit state, audit, policy, and credential paths
 - [x] Add an offline `vektor validate` command for health, fleet, rollout,
   authorization, approval, and trust configuration

@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	. /opt/ros/jazzy/setup.sh && dh_auto_configure -- -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+override_dh_auto_build:
+	. /opt/ros/jazzy/setup.sh && dh_auto_build
+
+override_dh_auto_test:
+	. /opt/ros/jazzy/setup.sh && dh_auto_test
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start

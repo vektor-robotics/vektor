@@ -430,6 +430,46 @@ The core library is intentionally independent of deployment orchestration. Futur
 
 ## Ubuntu 24.04 / ROS 2 Jazzy
 
+### Ubuntu package and managed agent
+
+The `debian/` manifest builds a versioned native Ubuntu 24.04 package in a
+sourced ROS 2 Jazzy environment:
+
+```bash
+sudo apt install -y build-essential debhelper devscripts
+dpkg-buildpackage -us -uc -b
+sudo apt install ../vektor_1.0.0-1_amd64.deb
+```
+
+Installation creates the `vektor` service account and persistent state and log
+directories at `/var/lib/vektor` and `/var/log/vektor`. It installs, but does
+not enable or start, `vektor-agent.service`. Before enabling it, replace the
+four root-owned, group-readable files in `/etc/vektor` and install the mTLS
+certificate, private key, and client CA under `/etc/vektor/tls`. The service
+uses those fixed paths for policy, trust, authorization, status history,
+deployment state, and audit records. It runs with systemd filesystem and
+privilege sandboxing; Docker support deliberately grants membership in the
+local `docker` group, which is privileged access and must be treated like root
+access on the host.
+
+The package does not choose or download a Cosign binary. Install a supported
+Cosign release using your organization’s approved software source and ensure
+`cosign` is on the service account’s `PATH` before enabling the agent.
+
+```bash
+sudo systemctl enable --now vektor-agent.service
+sudo systemctl status vektor-agent.service
+```
+
+The service remains inactive until its health policy and all three mTLS files
+exist. Validate every YAML file offline before replacing it:
+
+```bash
+sudo /usr/lib/vektor/vektor validate --type health --config /etc/vektor/policy.yaml
+sudo /usr/lib/vektor/vektor validate --type trust --config /etc/vektor/trust.yaml
+sudo /usr/lib/vektor/vektor validate --type authorization --config /etc/vektor/authorization.yaml
+```
+
 Install the ROS dependencies in a sourced Jazzy shell:
 
 ```bash

@@ -1,0 +1,4 @@
+/etc/vektor/agent.env
+/etc/vektor/policy.yaml
+/etc/vektor/trust.yaml
+/etc/vektor/authorization.yaml

@@ -6,6 +6,9 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Versioned Ubuntu 24.04 package metadata, a least-privilege `vektor` system
+  account, and a disabled-by-default hardened `systemd` agent service with
+  explicit configuration, credential, state, and audit paths.
 - Offline `vektor validate` support for strict health, fleet, rollout,
   authorization, approval, and trust configuration parsing without contacting
   ROS, agents, registries, or OCI runtimes.
