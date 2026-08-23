@@ -7,12 +7,26 @@
 #include <atomic>
 #include <fstream>
 #include <memory>
+#include <csignal>
 #include <stdexcept>
 #include <thread>
 #include <utility>
 
 namespace vektor {
 namespace {
+volatile std::sig_atomic_t reload_requested = 0;
+
+extern "C" void request_policy_reload(int) { reload_requested = 1; }
+
+void install_reload_handler() {
+  struct sigaction action {};
+  action.sa_handler = request_policy_reload;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = SA_RESTART;
+  if (sigaction(SIGHUP, &action, nullptr) != 0)
+    throw std::runtime_error("failed to install policy reload signal handler");
+}
+
 std::string read_file(const std::filesystem::path &path) {
   std::ifstream input(path, std::ios::binary);
   if (!input)
@@ -107,6 +121,8 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("agent listen address cannot be empty");
   if (options.interval.count() <= 0)
     throw std::invalid_argument("agent interval must be greater than zero");
+  if (options.health_policy_path.empty())
+    throw std::invalid_argument("health policy path cannot be empty");
   if (options.deployment_state_path.empty())
     throw std::invalid_argument("deployment state path cannot be empty");
   if (options.audit_log_path.empty())
@@ -149,6 +165,27 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument(
         "agent requires --tls-cert, --tls-key, and --tls-ca unless "
         "--insecure is used on loopback");
+}
+
+ReloadableCheckConfig::ReloadableCheckConfig(std::filesystem::path path,
+                                             CheckConfig initial)
+    : path_(std::move(path)), config_(std::move(initial)) {
+  if (path_.empty())
+    throw std::invalid_argument("health policy path cannot be empty");
+}
+
+CheckConfig ReloadableCheckConfig::current() const {
+  std::shared_lock lock(mutex_);
+  return config_;
+}
+
+void ReloadableCheckConfig::replace(CheckConfig config) {
+  std::unique_lock lock(mutex_);
+  config_ = std::move(config);
+}
+
+CheckConfig ReloadableCheckConfig::load_candidate() const {
+  return load_config(path_.string());
 }
 
 void AgentStatusState::publish(StatusSnapshot snapshot) {
@@ -409,6 +446,8 @@ AgentRunner::AgentRunner(rclcpp::Node::SharedPtr node, CheckConfig config,
 
 int AgentRunner::run() {
   validate_agent_options(options_);
+  install_reload_handler();
+  ReloadableCheckConfig health_policy(options_.health_policy_path, config_);
   auto runtime = std::make_shared<OciRuntimeDriver>(options_.oci_runtime,
                                                     options_.runtime_container);
   std::shared_ptr<ArtifactVerifier> verifier;
@@ -453,8 +492,28 @@ int AgentRunner::run() {
     while (!stop.load() && rclcpp::ok()) {
       const auto started_at = std::chrono::steady_clock::now();
       StatusSnapshot snapshot;
+      if (reload_requested != 0) {
+        reload_requested = 0;
+        try {
+          const auto candidate = health_policy.load_candidate();
+          audit->append({"system", "policy.reload", "succeeded", "", "",
+                         "", "", "health policy accepted"});
+          health_policy.replace(candidate);
+          RCLCPP_INFO(node_->get_logger(), "health policy reloaded");
+        } catch (const std::exception &error) {
+          try {
+            audit->append({"system", "policy.reload", "failed", "", "", "",
+                           "", error.what()});
+          } catch (const std::exception &audit_error) {
+            RCLCPP_ERROR(node_->get_logger(),
+                         "policy reload audit failed: %s", audit_error.what());
+          }
+          RCLCPP_ERROR(node_->get_logger(), "health policy reload failed: %s",
+                       error.what());
+        }
+      }
       try {
-        auto results = HealthInspector(node_).inspect(config_);
+        auto results = HealthInspector(node_).inspect(health_policy.current());
         const auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at);

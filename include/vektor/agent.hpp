@@ -16,11 +16,13 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 
 namespace vektor {
 
 struct AgentOptions {
+  std::filesystem::path health_policy_path;
   std::string listen_address{"127.0.0.1:50051"};
   std::chrono::milliseconds interval{5000};
   std::optional<std::filesystem::path> history_path;
@@ -39,6 +41,19 @@ struct AgentOptions {
 };
 
 void validate_agent_options(const AgentOptions &options);
+
+class ReloadableCheckConfig {
+public:
+  ReloadableCheckConfig(std::filesystem::path path, CheckConfig initial);
+  CheckConfig current() const;
+  void replace(CheckConfig config);
+  CheckConfig load_candidate() const;
+
+private:
+  std::filesystem::path path_;
+  mutable std::shared_mutex mutex_;
+  CheckConfig config_;
+};
 
 struct VersionedSnapshot {
   StatusSnapshot snapshot;

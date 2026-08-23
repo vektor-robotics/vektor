@@ -175,7 +175,7 @@ real robot without requiring a source checkout.
   service with explicit state, audit, policy, and credential paths
 - [x] Add an offline `vektor validate` command for health, fleet, rollout,
   authorization, approval, and trust configuration
-- [ ] Add transactional agent policy reload with validation, audit events, and
+- [x] Add transactional agent policy reload with validation, audit events, and
   automatic retention of the last known-good configuration
 - [ ] Export bounded operational metrics for agent health, reconciliation,
   authorization denials, rollout outcomes, and RPC latency

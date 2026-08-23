@@ -21,6 +21,7 @@ foreach(required
     "--deployment-state /var/lib/vektor/deployment.yaml"
     "--audit-log /var/log/vektor/audit.jsonl"
     "--tls-key /etc/vektor/tls/agent.key"
+    "ExecReload=/bin/kill -HUP $MAINPID"
     "NoNewPrivileges=yes"
     "ProtectSystem=strict"
     "ReadWritePaths=/var/lib/vektor /var/log/vektor"

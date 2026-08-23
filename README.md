@@ -461,6 +461,16 @@ sudo systemctl enable --now vektor-agent.service
 sudo systemctl status vektor-agent.service
 ```
 
+After replacing `/etc/vektor/policy.yaml`, validate it and request a
+transactional reload. VEKTOR retains the last known-good health policy if the
+replacement is invalid or cannot be audited; each attempt is recorded as a
+`policy.reload` audit event.
+
+```bash
+sudo /usr/lib/vektor/vektor validate --type health --config /etc/vektor/policy.yaml
+sudo systemctl reload vektor-agent.service
+```
+
 The service remains inactive until its health policy and all three mTLS files
 exist. Validate every YAML file offline before replacing it:
 

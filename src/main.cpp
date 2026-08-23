@@ -385,6 +385,7 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
               const rclcpp::Node::SharedPtr &node) {
   vektor::AgentOptions agent_options;
   agent_options.listen_address = options.listen_address;
+  agent_options.health_policy_path = options.config_path;
   agent_options.interval = options.interval;
   agent_options.history_path = options.history_path;
   agent_options.history = options.history;
