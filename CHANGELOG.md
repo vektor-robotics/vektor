@@ -6,6 +6,9 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Offline `vektor validate` support for strict health, fleet, rollout,
+  authorization, approval, and trust configuration parsing without contacting
+  ROS, agents, registries, or OCI runtimes.
 - Opt-in real OCI runtime-driver qualification for digest-pinned Docker and
   Podman workloads on Ubuntu 24.04 / ROS 2 Jazzy.
 - v1.0.0 release metadata, an enforced CMake/package version match, and a

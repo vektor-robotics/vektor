@@ -1,11 +1,13 @@
 #include "vektor/agent.hpp"
 #include "vektor/approval.hpp"
+#include "vektor/authorization.hpp"
 #include "vektor/config.hpp"
 #include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
 #include "vektor/reporter.hpp"
 #include "vektor/rollout.hpp"
 #include "vektor/status.hpp"
+#include "vektor/trust.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -24,6 +26,7 @@ struct CliOptions {
   std::string command;
   std::string config_path;
   std::string format{"text"};
+  std::string validation_type;
   std::string robot_id;
   std::string fleet_id;
   std::string workload_id;
@@ -55,6 +58,9 @@ struct CliOptions {
     std::cerr << "vektor: " << message << "\n\n";
   std::cerr << "Usage:\n"
             << "  vektor check  --config <path> [--format text|json]\n"
+            << "  vektor validate --type health|fleet|rollout|authorization|"
+               "approval-policy|approvals|trust\n"
+            << "                  --config <path> [--format text|json]\n"
             << "  vektor status --config <path> [--format text|json] "
                "[--robot-id <id>]\n"
             << "                [--watch] [--interval-ms <ms>] "
@@ -98,6 +104,7 @@ CliOptions parse_cli(int argc, char **argv) {
   options.command = argv[1];
   if (options.command != "check" && options.command != "status" &&
       options.command != "agent" && options.command != "fleet" &&
+      options.command != "validate" &&
       options.command != "deploy" && options.command != "promote" &&
       options.command != "rollback" && options.command != "approval-payload")
     usage_error("unknown command '" + options.command + "'");
@@ -108,6 +115,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.config_path = next_value(index, argc, argv, argument);
     else if (argument == "--format")
       options.format = next_value(index, argc, argv, argument);
+    else if (argument == "--type")
+      options.validation_type = next_value(index, argc, argv, argument);
     else if (argument == "--robot-id")
       options.robot_id = next_value(index, argc, argv, argument);
     else if (argument == "--fleet-id")
@@ -188,6 +197,27 @@ CliOptions parse_cli(int argc, char **argv) {
     usage_error("--config is required");
   if (options.format != "text" && options.format != "json")
     usage_error("--format must be text or json");
+  const bool validation_command = options.command == "validate";
+  if (!validation_command && !options.validation_type.empty())
+    usage_error("--type is supported only by validate");
+  if (validation_command) {
+    static const std::vector<std::string> validation_types{
+        "health", "fleet", "rollout", "authorization", "approval-policy",
+        "approvals", "trust"};
+    if (std::find(validation_types.begin(), validation_types.end(),
+                  options.validation_type) == validation_types.end())
+      usage_error("validate requires a supported --type");
+    if (options.watch || !options.robot_id.empty() || !options.fleet_id.empty() ||
+        !options.workload_id.empty() || options.history_path || !options.history ||
+        options.insecure || options.tls_certificate || options.tls_private_key ||
+        options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
+        !options.selectors.empty() || options.limit ||
+        options.deployment_state != ".vektor/deployment.yaml" ||
+        options.audit_log != ".vektor/audit.jsonl" || options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" || options.trust_policy ||
+        options.authorization_policy || options.interval != std::chrono::milliseconds(5000))
+      usage_error("option is not supported by validate");
+  }
   const bool approval_payload_command = options.command == "approval-payload";
   const bool has_approval_payload_options =
       !options.wave.empty() || !options.approval_identity.empty() ||
@@ -283,6 +313,31 @@ int run_check(const CliOptions &options, const vektor::CheckConfig &config,
   else
     vektor::print_results(results, std::cout);
   return vektor::all_checks_passed(results) ? 0 : 1;
+}
+
+int run_validate(const CliOptions &options) {
+  if (options.validation_type == "health")
+    static_cast<void>(vektor::load_config(options.config_path));
+  else if (options.validation_type == "fleet")
+    static_cast<void>(vektor::load_fleet_config(options.config_path));
+  else if (options.validation_type == "rollout")
+    static_cast<void>(vektor::load_rollout_config(options.config_path));
+  else if (options.validation_type == "authorization")
+    static_cast<void>(vektor::load_authorization_policy(options.config_path));
+  else if (options.validation_type == "approval-policy")
+    static_cast<void>(vektor::load_approval_policy(options.config_path));
+  else if (options.validation_type == "approvals")
+    static_cast<void>(vektor::load_approval_records(options.config_path));
+  else
+    static_cast<void>(vektor::load_trust_policy(options.config_path));
+
+  if (options.format == "json")
+    std::cout << "{\"schema_version\":1,\"valid\":true,\"type\":\""
+              << options.validation_type << "\"}\n";
+  else
+    std::cout << "VEKTOR VALIDATION PASSED\ntype: "
+              << options.validation_type << '\n';
+  return 0;
 }
 
 int run_status(const CliOptions &options, const vektor::CheckConfig &config,
@@ -415,7 +470,9 @@ int main(int argc, char **argv) {
   try {
     const auto options = parse_cli(argc, argv);
     int exit_code = 0;
-    if (options.command == "approval-payload") {
+    if (options.command == "validate") {
+      exit_code = run_validate(options);
+    } else if (options.command == "approval-payload") {
       exit_code = run_approval_payload(
           options, vektor::load_rollout_config(options.config_path));
     } else if (options.command == "deploy" || options.command == "promote" ||

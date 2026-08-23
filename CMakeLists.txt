@@ -224,6 +224,18 @@ if(BUILD_TESTING)
   ament_add_gtest(test_rollout test/test_rollout.cpp)
   target_link_libraries(test_rollout vektor_rollout vektor_agent
     vektor_deployment vektor_proto gRPC::grpc++)
+
+  add_test(NAME test_validate_cli
+    COMMAND $<TARGET_FILE:vektor> validate --type health
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml --format json)
+  set_tests_properties(test_validate_cli PROPERTIES
+    PASS_REGULAR_EXPRESSION "\\\"schema_version\\\":1,\\\"valid\\\":true,\\\"type\\\":\\\"health\\\"")
+
+  add_test(NAME test_validate_cli_rejects_unknown_type
+    COMMAND $<TARGET_FILE:vektor> validate --type unsupported
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml)
+  set_tests_properties(test_validate_cli_rejects_unknown_type PROPERTIES
+    WILL_FAIL TRUE)
 endif()
 
 ament_export_include_directories(include)

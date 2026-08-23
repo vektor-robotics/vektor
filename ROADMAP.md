@@ -173,7 +173,7 @@ real robot without requiring a source checkout.
 
 - [ ] Produce versioned Ubuntu 24.04 packages and a hardened `systemd` agent
   service with explicit state, audit, policy, and credential paths
-- [ ] Add an offline `vektor validate` command for health, fleet, rollout,
+- [x] Add an offline `vektor validate` command for health, fleet, rollout,
   authorization, approval, and trust configuration
 - [ ] Add transactional agent policy reload with validation, audit events, and
   automatic retention of the last known-good configuration

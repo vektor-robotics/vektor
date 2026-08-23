@@ -20,6 +20,25 @@ deployment commands run health-gated OCI rollouts with durable audit events.
 
 The check exits `0` only when every configured check passes, `1` when a health check fails, and `2` for invalid CLI/configuration errors.
 
+## Offline configuration validation
+
+Validate configuration before installing it on a robot or reloading agent
+policy. This command uses VEKTOR's strict parsers but does not contact ROS,
+agents, registries, or an OCI runtime.
+
+```bash
+vektor validate --type health --config config/example.yaml
+vektor validate --type fleet --config config/fleet.example.yaml --format json
+vektor validate --type rollout --config config/rollout.example.yaml
+vektor validate --type authorization --config config/authorization.example.yaml
+vektor validate --type approval-policy --config config/approval-policy.example.yaml
+vektor validate --type approvals --config config/approvals.example.yaml
+vektor validate --type trust --config config/trust.example.yaml
+```
+
+JSON output is schema 1 and contains `valid` and `type`; validation failures
+return exit code 2 with the parser's field-specific error.
+
 ## Status snapshots
 
 ```bash
