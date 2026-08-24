@@ -171,19 +171,25 @@ rerunning past the first failure.
 Make VEKTOR straightforward to install, supervise, diagnose, and upgrade on a
 real robot without requiring a source checkout.
 
-- [ ] Produce versioned Ubuntu 24.04 packages and a hardened `systemd` agent
+- [x] Produce versioned Ubuntu 24.04 packages and a hardened `systemd` agent
   service with explicit state, audit, policy, and credential paths
-- [ ] Add an offline `vektor validate` command for health, fleet, rollout,
+- [x] Add an offline `vektor validate` command for health, fleet, rollout,
   authorization, approval, and trust configuration
-- [ ] Add transactional agent policy reload with validation, audit events, and
+- [x] Add transactional agent policy reload with validation, audit events, and
   automatic retention of the last known-good configuration
-- [ ] Export bounded operational metrics for agent health, reconciliation,
+- [x] Export bounded operational metrics for agent health, reconciliation,
   authorization denials, rollout outcomes, and RPC latency
-- [ ] Add a redacted support-bundle command that collects versions,
+- [x] Add a redacted support-bundle command that collects versions,
   configuration fingerprints, status, and recent diagnostics without private
   keys or secret values
-- [ ] Qualify clean install, reboot recovery, package upgrade, package rollback,
-  and uninstall behavior in CI or disposable Ubuntu VMs
+- [x] Qualify clean install, reboot recovery, package upgrade, package rollback,
+  and uninstall behavior in a disposable systemd-enabled Ubuntu 24.04 WSL
+  environment
+
+Lifecycle qualification installs a lower-version package, restarts WSL, upgrades
+to the current package, downgrades again, and purges it. Release owners still
+need to verify the signed release artifact on a clean production-equivalent
+Jazzy machine before publishing it.
 
 Definition of done: an operator can install a signed package on a clean Jazzy
 machine, start VEKTOR as a least-privilege service, validate and safely reload

@@ -7,12 +7,26 @@
 #include <atomic>
 #include <fstream>
 #include <memory>
+#include <csignal>
 #include <stdexcept>
 #include <thread>
 #include <utility>
 
 namespace vektor {
 namespace {
+volatile std::sig_atomic_t reload_requested = 0;
+
+extern "C" void request_policy_reload(int) { reload_requested = 1; }
+
+void install_reload_handler() {
+  struct sigaction action {};
+  action.sa_handler = request_policy_reload;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = SA_RESTART;
+  if (sigaction(SIGHUP, &action, nullptr) != 0)
+    throw std::runtime_error("failed to install policy reload signal handler");
+}
+
 std::string read_file(const std::filesystem::path &path) {
   std::ifstream input(path, std::ios::binary);
   if (!input)
@@ -100,6 +114,31 @@ std::string audit_actor(const grpc::ServerContext &context) {
     return "mtls:" + *identity;
   return "unauthenticated:" + context.peer();
 }
+
+class RpcMetricScope {
+public:
+  explicit RpcMetricScope(const std::shared_ptr<OperationalMetrics> &metrics)
+      : metrics_(metrics), started_(std::chrono::steady_clock::now()) {}
+  ~RpcMetricScope() {
+    if (metrics_)
+      metrics_->record_rpc(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started_));
+  }
+private:
+  std::shared_ptr<OperationalMetrics> metrics_;
+  std::chrono::steady_clock::time_point started_;
+};
+
+class RolloutMetricScope {
+public:
+  explicit RolloutMetricScope(const std::shared_ptr<OperationalMetrics> &metrics)
+      : metrics_(metrics) {}
+  ~RolloutMetricScope() { if (metrics_) metrics_->record_rollout(success_); }
+  void succeeded() { success_ = true; }
+private:
+  std::shared_ptr<OperationalMetrics> metrics_;
+  bool success_{false};
+};
 } // namespace
 
 void validate_agent_options(const AgentOptions &options) {
@@ -107,6 +146,10 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("agent listen address cannot be empty");
   if (options.interval.count() <= 0)
     throw std::invalid_argument("agent interval must be greater than zero");
+  if (options.health_policy_path.empty())
+    throw std::invalid_argument("health policy path cannot be empty");
+  if (options.metrics_path.empty())
+    throw std::invalid_argument("metrics path cannot be empty");
   if (options.deployment_state_path.empty())
     throw std::invalid_argument("deployment state path cannot be empty");
   if (options.audit_log_path.empty())
@@ -149,6 +192,27 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument(
         "agent requires --tls-cert, --tls-key, and --tls-ca unless "
         "--insecure is used on loopback");
+}
+
+ReloadableCheckConfig::ReloadableCheckConfig(std::filesystem::path path,
+                                             CheckConfig initial)
+    : path_(std::move(path)), config_(std::move(initial)) {
+  if (path_.empty())
+    throw std::invalid_argument("health policy path cannot be empty");
+}
+
+CheckConfig ReloadableCheckConfig::current() const {
+  std::shared_lock lock(mutex_);
+  return config_;
+}
+
+void ReloadableCheckConfig::replace(CheckConfig config) {
+  std::unique_lock lock(mutex_);
+  config_ = std::move(config);
+}
+
+CheckConfig ReloadableCheckConfig::load_candidate() const {
+  return load_config(path_.string());
 }
 
 void AgentStatusState::publish(StatusSnapshot snapshot) {
@@ -214,10 +278,10 @@ GrpcAgentService::GrpcAgentService(const AgentStatusState &state)
 GrpcAgentService::GrpcAgentService(
     const AgentStatusState &state, AgentDeploymentState &deployment_state,
     std::shared_ptr<const AuthorizationPolicy> authorization,
-    AuthorizationScope resource_scope)
+    AuthorizationScope resource_scope, std::shared_ptr<OperationalMetrics> metrics)
     : state_(state), deployment_state_(&deployment_state),
       authorization_(std::move(authorization)),
-      resource_scope_(std::move(resource_scope)) {}
+      resource_scope_(std::move(resource_scope)), metrics_(std::move(metrics)) {}
 
 grpc::Status
 GrpcAgentService::authorize(const grpc::ServerContext &context,
@@ -236,6 +300,8 @@ GrpcAgentService::authorize(const grpc::ServerContext &context,
       request_matches_resource)
     return grpc::Status::OK;
   const auto detail = authorization_denial_json(action);
+  if (metrics_)
+    metrics_->record_authorization_denial();
   if (deployment_state_) {
     try {
       deployment_state_->audit_authorization_denied(
@@ -250,6 +316,7 @@ grpc::Status
 GrpcAgentService::GetStatus(grpc::ServerContext *context,
                             const vektor::agent::v1::GetStatusRequest *request,
                             vektor::agent::v1::StatusSnapshot *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Inspect,
                                     request->scope(), false);
       !status.ok())
@@ -266,6 +333,8 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::PrepareDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
+  RolloutMetricScope rollout_metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Deploy,
                                     request->scope(), true);
       !status.ok())
@@ -283,6 +352,7 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     *response = to_proto(deployment_state_->prepare(
         request->deployment_id(), request->artifact(), workload, timeout,
         audit_actor(*context)));
+    rollout_metric.succeeded();
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -295,6 +365,8 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::ActivateDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
+  RolloutMetricScope rollout_metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Promote,
                                     request->scope(), true);
       !status.ok())
@@ -328,6 +400,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     *response = to_proto(record);
     response->set_message(record.message + "; fresh ROS health is " +
                           health_state_name(fresh->snapshot.state));
+    rollout_metric.succeeded();
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -345,6 +418,8 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::RollbackDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
+  RolloutMetricScope rollout_metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Rollback,
                                     request->scope(), true);
       !status.ok())
@@ -358,6 +433,7 @@ grpc::Status GrpcAgentService::RollbackDeployment(
                         std::chrono::minutes(5), "operation_timeout_ms");
     *response = to_proto(deployment_state_->rollback(
         request->deployment_id(), timeout, audit_actor(*context)));
+    rollout_metric.succeeded();
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -370,6 +446,7 @@ grpc::Status GrpcAgentService::GetDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::GetDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Inspect,
                                     request->scope(), true);
       !status.ok())
@@ -385,6 +462,7 @@ grpc::Status GrpcAgentService::WatchStatus(
     grpc::ServerContext *context,
     const vektor::agent::v1::WatchStatusRequest *request,
     grpc::ServerWriter<vektor::agent::v1::StatusSnapshot> *writer) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Inspect,
                                     request->scope(), false);
       !status.ok())
@@ -409,6 +487,8 @@ AgentRunner::AgentRunner(rclcpp::Node::SharedPtr node, CheckConfig config,
 
 int AgentRunner::run() {
   validate_agent_options(options_);
+  install_reload_handler();
+  ReloadableCheckConfig health_policy(options_.health_policy_path, config_);
   auto runtime = std::make_shared<OciRuntimeDriver>(options_.oci_runtime,
                                                     options_.runtime_container);
   std::shared_ptr<ArtifactVerifier> verifier;
@@ -420,6 +500,7 @@ int AgentRunner::run() {
     authorization = std::make_shared<const AuthorizationPolicy>(
         load_authorization_policy(*options_.authorization_policy_path));
   auto audit = std::make_shared<JsonLinesAuditLog>(options_.audit_log_path);
+  auto metrics = std::make_shared<OperationalMetrics>();
   AgentDeploymentState deployment_state(options_.deployment_state_path,
                                         std::move(runtime), std::move(verifier),
                                         std::move(audit));
@@ -430,7 +511,7 @@ int AgentRunner::run() {
       RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
   }
   GrpcAgentService service(state_, deployment_state, std::move(authorization),
-                           options_.resource_scope);
+                           options_.resource_scope, metrics);
   grpc::ServerBuilder builder;
   int bound_port = 0;
   builder.AddListeningPort(options_.listen_address,
@@ -453,8 +534,28 @@ int AgentRunner::run() {
     while (!stop.load() && rclcpp::ok()) {
       const auto started_at = std::chrono::steady_clock::now();
       StatusSnapshot snapshot;
+      if (reload_requested != 0) {
+        reload_requested = 0;
+        try {
+          const auto candidate = health_policy.load_candidate();
+          audit->append({"system", "policy.reload", "succeeded", "", "",
+                         "", "", "health policy accepted"});
+          health_policy.replace(candidate);
+          RCLCPP_INFO(node_->get_logger(), "health policy reloaded");
+        } catch (const std::exception &error) {
+          try {
+            audit->append({"system", "policy.reload", "failed", "", "", "",
+                           "", error.what()});
+          } catch (const std::exception &audit_error) {
+            RCLCPP_ERROR(node_->get_logger(),
+                         "policy reload audit failed: %s", audit_error.what());
+          }
+          RCLCPP_ERROR(node_->get_logger(), "health policy reload failed: %s",
+                       error.what());
+        }
+      }
       try {
-        auto results = HealthInspector(node_).inspect(config_);
+        auto results = HealthInspector(node_).inspect(health_policy.current());
         const auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - started_at);
@@ -477,12 +578,16 @@ int AgentRunner::run() {
         }
       }
       state_.publish(std::move(snapshot));
+      const auto latest = state_.latest();
+      if (latest)
+        metrics->record_health(latest->snapshot.state);
 
       if (deployment_state.current().phase != DeploymentPhase::Idle ||
           deployment_state.current().operation !=
               ReconciliationOperation::None) {
         try {
           const auto deployment = deployment_state.refresh_observed();
+          metrics->record_reconciliation(!deployment.drift_detected);
           if (deployment.drift_detected)
             RCLCPP_ERROR(node_->get_logger(), "%s", deployment.message.c_str());
         } catch (const std::exception &error) {
@@ -491,6 +596,8 @@ int AgentRunner::run() {
                        error.what());
         }
       }
+      try { metrics->write_prometheus(options_.metrics_path); }
+      catch (const std::exception &error) { RCLCPP_WARN(node_->get_logger(), "metrics write failed: %s", error.what()); }
 
       const auto next_run = started_at + options_.interval;
       while (!stop.load() && rclcpp::ok() &&

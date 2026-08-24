@@ -1,0 +1,49 @@
+[Unit]
+Description=VEKTOR ROS 2 delivery agent
+Documentation=https://github.com/vektor-robotics/vektor
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/vektor/policy.yaml
+ConditionPathExists=/etc/vektor/tls/agent.crt
+ConditionPathExists=/etc/vektor/tls/agent.key
+ConditionPathExists=/etc/vektor/tls/client-ca.crt
+
+[Service]
+Type=simple
+User=vektor
+Group=vektor
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/vektor
+Environment=HOME=/var/lib/vektor
+Environment=ROS_LOG_DIR=/var/log/vektor/ros
+EnvironmentFile=-/etc/vektor/agent.env
+ExecStart=/usr/lib/vektor/vektor agent --config /etc/vektor/policy.yaml --listen 0.0.0.0:50051 --interval-ms 5000 --tls-cert /etc/vektor/tls/agent.crt --tls-key /etc/vektor/tls/agent.key --tls-ca /etc/vektor/tls/client-ca.crt --history /var/lib/vektor/status.jsonl --deployment-state /var/lib/vektor/deployment.yaml --audit-log /var/log/vektor/audit.jsonl --metrics /var/lib/vektor/metrics.prom --trust-policy /etc/vektor/trust.yaml --authorization-policy /etc/vektor/authorization.yaml --fleet-id ${VEKTOR_FLEET_ID} --workload-id ${VEKTOR_WORKLOAD_ID}
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=45s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/vektor /var/log/vektor
+
+[Install]
+WantedBy=multi-user.target

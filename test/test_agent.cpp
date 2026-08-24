@@ -5,6 +5,7 @@
 #include <google/protobuf/descriptor.h>
 
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <string>
@@ -53,12 +54,34 @@ public:
 
 TEST(AgentOptions, AllowsExplicitLoopbackInsecureMode) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.insecure = true;
   EXPECT_NO_THROW(vektor::validate_agent_options(options));
 }
 
+TEST(OperationalMetrics, RendersBoundedPrometheusCounters) {
+  vektor::OperationalMetrics metrics;
+  metrics.record_health(vektor::HealthState::Healthy);
+  metrics.record_authorization_denial();
+  metrics.record_reconciliation(false);
+  metrics.record_rollout(true);
+  metrics.record_rpc(std::chrono::milliseconds(7));
+  const auto rendered = metrics.prometheus();
+  EXPECT_NE(rendered.find("vektor_health_inspections_total{state=\"healthy\"} 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_authorization_denials_total 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_reconciliation_total{outcome=\"failure\"} 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_rollout_total{outcome=\"success\"} 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_rpc_latency_milliseconds_total 7"),
+            std::string::npos);
+}
+
 TEST(AgentOptions, RejectsInsecurePublicListener) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.insecure = true;
   options.listen_address = "0.0.0.0:50051";
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
@@ -66,6 +89,7 @@ TEST(AgentOptions, RejectsInsecurePublicListener) {
 
 TEST(AgentOptions, RequiresCompleteMutualTlsConfiguration) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.tls_certificate = "server.crt";
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
   options.tls_private_key = "server.key";
@@ -75,6 +99,7 @@ TEST(AgentOptions, RequiresCompleteMutualTlsConfiguration) {
 
 TEST(AgentOptions, RejectsInvalidRuntimeContainerName) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.insecure = true;
   options.runtime_container = "invalid name";
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
@@ -82,6 +107,7 @@ TEST(AgentOptions, RejectsInvalidRuntimeContainerName) {
 
 TEST(AgentOptions, RequiresAuditLogPath) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.insecure = true;
   options.audit_log_path.clear();
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
@@ -89,6 +115,7 @@ TEST(AgentOptions, RequiresAuditLogPath) {
 
 TEST(AgentOptions, RequiresMutualTlsForAuthorizationPolicy) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.insecure = true;
   options.authorization_policy_path = "authorization.yaml";
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
@@ -96,6 +123,7 @@ TEST(AgentOptions, RequiresMutualTlsForAuthorizationPolicy) {
 
 TEST(AgentOptions, RequiresServerBoundScopeForAuthorizationPolicy) {
   vektor::AgentOptions options;
+  options.health_policy_path = "policy.yaml";
   options.authorization_policy_path = "authorization.yaml";
   options.tls_certificate = "server.crt";
   options.tls_private_key = "server.key";
@@ -103,6 +131,28 @@ TEST(AgentOptions, RequiresServerBoundScopeForAuthorizationPolicy) {
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
   options.resource_scope = {"warehouse-prod", "picker"};
   EXPECT_NO_THROW(vektor::validate_agent_options(options));
+}
+
+TEST(AgentPolicy, KeepsLastKnownGoodConfigWhenReplacementIsInvalid) {
+  const auto path = std::filesystem::path("vektor_test_reload_policy.yaml");
+  {
+    std::ofstream output(path);
+    output << "schema_version: 1\nrobot_id: before\n";
+  }
+  vektor::ReloadableCheckConfig policy(path, vektor::load_config(path.string()));
+  {
+    std::ofstream output(path);
+    output << "schema_version: 1\nrobot_id: after\n";
+  }
+  policy.replace(policy.load_candidate());
+  EXPECT_EQ(policy.current().robot_id, "after");
+  {
+    std::ofstream output(path);
+    output << "schema_version: 99\nrobot_id: rejected\n";
+  }
+  EXPECT_THROW(policy.load_candidate(), std::runtime_error);
+  EXPECT_EQ(policy.current().robot_id, "after");
+  std::filesystem::remove(path);
 }
 
 TEST(AgentStatusState, PublishesAndWaitsForVersionedSnapshots) {

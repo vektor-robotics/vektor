@@ -1,0 +1,21 @@
+Source: vektor
+Section: utils
+Priority: optional
+Maintainer: Nahid Guliyev <nahid633@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), cmake, g++, pkg-config,
+ ros-jazzy-ament-cmake, ros-jazzy-rclcpp, ros-jazzy-rclcpp-action,
+ ros-jazzy-tf2, ros-jazzy-tf2-ros, ros-jazzy-lifecycle-msgs,
+ libyaml-cpp-dev, libprotobuf-dev, protobuf-compiler, libgrpc++-dev,
+ protobuf-compiler-grpc, libssl-dev
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: vektor
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}, adduser,
+ ros-jazzy-rclcpp, ros-jazzy-rclcpp-action, ros-jazzy-tf2,
+ ros-jazzy-tf2-ros, ros-jazzy-lifecycle-msgs
+Recommends: docker.io
+Description: health-aware software delivery agent for ROS 2 fleets
+ VEKTOR validates health, serves authenticated agent APIs, and carries out
+ health-gated, digest-pinned OCI rollouts for autonomous-machine fleets.

@@ -6,6 +6,28 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- WSL systemd package-lifecycle qualification covering clean installation,
+  restart persistence, upgrade, downgrade, and purge cleanup. Package purge
+  now removes empty VEKTOR runtime and log directories while retaining
+  operator-created diagnostic contents.
+- Bounded status-history and Prometheus diagnostic collection in the redacted
+  support bundle, with explicit caller-selected paths.
+- Deployment-operation outcome counters in the bounded Prometheus metrics
+  file, alongside per-RPC latency totals.
+- A disposable-VM package lifecycle harness for clean install, reboot,
+  upgrade, rollback, and uninstall qualification.
+- Redacted support bundles containing version metadata and configuration
+  fingerprints without configuration contents, credentials, or audit payloads.
+- Bounded Prometheus textfile metrics for agent health, authorization denials,
+  reconciliation outcomes, and RPC activity without unbounded identifiers.
+- Transactional SIGHUP/systemd health-policy reloads that validate candidates,
+  retain the last known-good policy on failure, and audit every outcome.
+- Versioned Ubuntu 24.04 package metadata, a least-privilege `vektor` system
+  account, and a disabled-by-default hardened `systemd` agent service with
+  explicit configuration, credential, state, and audit paths.
+- Offline `vektor validate` support for strict health, fleet, rollout,
+  authorization, approval, and trust configuration parsing without contacting
+  ROS, agents, registries, or OCI runtimes.
 - Opt-in real OCI runtime-driver qualification for digest-pinned Docker and
   Podman workloads on Ubuntu 24.04 / ROS 2 Jazzy.
 - v1.0.0 release metadata, an enforced CMake/package version match, and a

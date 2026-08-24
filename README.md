@@ -20,6 +20,36 @@ deployment commands run health-gated OCI rollouts with durable audit events.
 
 The check exits `0` only when every configured check passes, `1` when a health check fails, and `2` for invalid CLI/configuration errors.
 
+## Offline configuration validation
+
+Validate configuration before installing it on a robot or reloading agent
+policy. This command uses VEKTOR's strict parsers but does not contact ROS,
+agents, registries, or an OCI runtime.
+
+```bash
+vektor validate --type health --config config/example.yaml
+vektor validate --type fleet --config config/fleet.example.yaml --format json
+vektor validate --type rollout --config config/rollout.example.yaml
+vektor validate --type authorization --config config/authorization.example.yaml
+vektor validate --type approval-policy --config config/approval-policy.example.yaml
+vektor validate --type approvals --config config/approvals.example.yaml
+vektor validate --type trust --config config/trust.example.yaml
+```
+
+JSON output is schema 1 and contains `valid` and `type`; validation failures
+return exit code 2 with the parser's field-specific error.
+
+## Redacted support bundle
+
+Create a fresh support directory with version metadata and a SHA-256 fingerprint
+of the health configuration. The command deliberately excludes configuration
+contents, certificates, private keys, trust/approval files, and audit payloads.
+
+```bash
+vektor support-bundle --config /etc/vektor/policy.yaml --history /var/lib/vektor/status.jsonl \
+  --metrics /var/lib/vektor/metrics.prom --output /tmp/vektor-support
+```
+
 ## Status snapshots
 
 ```bash
@@ -410,6 +440,62 @@ test/                 GoogleTest coverage
 The core library is intentionally independent of deployment orchestration. Future commands can add command modules and reuse `CheckConfig`, `HealthInspector`, and the result/reporting types.
 
 ## Ubuntu 24.04 / ROS 2 Jazzy
+
+### Ubuntu package and managed agent
+
+The `debian/` manifest builds a versioned native Ubuntu 24.04 package in a
+sourced ROS 2 Jazzy environment:
+
+```bash
+sudo apt install -y build-essential debhelper devscripts
+dpkg-buildpackage -us -uc -b
+sudo apt install ../vektor_1.0.0-1_amd64.deb
+```
+
+Installation creates the `vektor` service account and persistent state and log
+directories at `/var/lib/vektor` and `/var/log/vektor`. It installs, but does
+not enable or start, `vektor-agent.service`. Before enabling it, replace the
+four root-owned, group-readable files in `/etc/vektor` and install the mTLS
+certificate, private key, and client CA under `/etc/vektor/tls`. The service
+uses those fixed paths for policy, trust, authorization, status history,
+deployment state, and audit records. It runs with systemd filesystem and
+privilege sandboxing; Docker support deliberately grants membership in the
+local `docker` group, which is privileged access and must be treated like root
+access on the host.
+
+The package does not choose or download a Cosign binary. Install a supported
+Cosign release using your organization’s approved software source and ensure
+`cosign` is on the service account’s `PATH` before enabling the agent.
+
+```bash
+sudo systemctl enable --now vektor-agent.service
+sudo systemctl status vektor-agent.service
+```
+
+After replacing `/etc/vektor/policy.yaml`, validate it and request a
+transactional reload. VEKTOR retains the last known-good health policy if the
+replacement is invalid or cannot be audited; each attempt is recorded as a
+`policy.reload` audit event.
+
+```bash
+sudo /usr/lib/vektor/vektor validate --type health --config /etc/vektor/policy.yaml
+sudo systemctl reload vektor-agent.service
+```
+
+The service remains inactive until its health policy and all three mTLS files
+exist. Validate every YAML file offline before replacing it:
+
+```bash
+sudo /usr/lib/vektor/vektor validate --type health --config /etc/vektor/policy.yaml
+sudo /usr/lib/vektor/vektor validate --type trust --config /etc/vektor/trust.yaml
+sudo /usr/lib/vektor/vektor validate --type authorization --config /etc/vektor/authorization.yaml
+```
+
+The agent writes fixed-cardinality Prometheus text metrics to
+`/var/lib/vektor/metrics.prom` (override with `--metrics`). Collect that file
+with a host textfile collector; it contains health inspections, authorization
+denials, reconciliation outcomes, and RPC counters/latency totals without
+robot, certificate, or deployment identifiers as labels.
 
 Install the ROS dependencies in a sourced Jazzy shell:
 

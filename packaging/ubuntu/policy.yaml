@@ -1,0 +1,8 @@
+# Install-specific health policy. Replace this example before enabling the agent.
+schema_version: 1
+robot_id: replace-with-robot-id
+discovery_timeout_ms: 750
+required_nodes: []
+required_topics: []
+required_tf: []
+lifecycle: []

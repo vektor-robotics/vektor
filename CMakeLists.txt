@@ -73,14 +73,16 @@ target_link_libraries(vektor_proto PUBLIC protobuf::libprotobuf gRPC::grpc++)
 add_library(vektor_core
   src/config.cpp
   src/health_inspector.cpp
+  src/metrics.cpp
   src/reporter.cpp
   src/status.cpp
+  src/support_bundle.cpp
 )
 target_include_directories(vektor_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(vektor_core yaml-cpp)
+target_link_libraries(vektor_core yaml-cpp OpenSSL::Crypto)
 ament_target_dependencies(vektor_core
   rclcpp
   rclcpp_action
@@ -188,6 +190,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_status test/test_status.cpp)
   target_link_libraries(test_status vektor_core)
 
+  ament_add_gtest(test_support_bundle test/test_support_bundle.cpp)
+  target_link_libraries(test_support_bundle vektor_core)
+
   ament_add_gtest(test_agent test/test_agent.cpp)
   target_link_libraries(test_agent vektor_agent vektor_proto gRPC::grpc++)
 
@@ -224,6 +229,22 @@ if(BUILD_TESTING)
   ament_add_gtest(test_rollout test/test_rollout.cpp)
   target_link_libraries(test_rollout vektor_rollout vektor_agent
     vektor_deployment vektor_proto gRPC::grpc++)
+
+  add_test(NAME test_validate_cli
+    COMMAND $<TARGET_FILE:vektor> validate --type health
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml --format json)
+  set_tests_properties(test_validate_cli PROPERTIES
+    PASS_REGULAR_EXPRESSION "\\\"schema_version\\\":1,\\\"valid\\\":true,\\\"type\\\":\\\"health\\\"")
+
+  add_test(NAME test_validate_cli_rejects_unknown_type
+    COMMAND $<TARGET_FILE:vektor> validate --type unsupported
+      --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml)
+  set_tests_properties(test_validate_cli_rejects_unknown_type PROPERTIES
+    WILL_FAIL TRUE)
+
+  add_test(NAME test_ubuntu_packaging
+    COMMAND ${CMAKE_COMMAND} -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/verify_ubuntu_packaging.cmake)
 endif()
 
 ament_export_include_directories(include)

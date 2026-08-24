@@ -1,0 +1,5 @@
+packaging/ubuntu/vektor-agent.service lib/systemd/system
+packaging/ubuntu/agent.env etc/vektor
+packaging/ubuntu/policy.yaml etc/vektor
+packaging/ubuntu/trust.yaml etc/vektor
+packaging/ubuntu/authorization.yaml etc/vektor

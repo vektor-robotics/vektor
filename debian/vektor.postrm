@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+if [ "$1" = purge ]; then
+  # These directories are created exclusively by vektor.postinst.  Remove them
+  # only when empty so a locally retained diagnostic is never discarded.
+  rmdir /var/log/vektor/ros /var/log/vektor /var/lib/vektor 2>/dev/null || true
+fi
+
+#DEBHELPER#

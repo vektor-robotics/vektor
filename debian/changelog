@@ -1,0 +1,5 @@
+vektor (1.0.0-1) noble; urgency=medium
+
+  * Initial Ubuntu 24.04 package with hardened VEKTOR agent service.
+
+ -- Nahid Guliyev <nahid633@users.noreply.github.com>  Sun, 24 Aug 2026 12:00:00 +0000
