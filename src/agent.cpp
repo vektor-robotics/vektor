@@ -282,6 +282,21 @@ GrpcAgentService::GrpcAgentService(
       authorization_(std::move(authorization)),
       resource_scope_(std::move(resource_scope)), metrics_(std::move(metrics)) {}
 
+GrpcAgentService::GrpcAgentService(
+    const AgentStatusState &state, WorkloadDeploymentStates &deployment_states,
+    std::shared_ptr<const AuthorizationPolicy> authorization,
+    AuthorizationScope resource_scope, std::shared_ptr<OperationalMetrics> metrics)
+    : state_(state), deployment_states_(&deployment_states),
+      authorization_(std::move(authorization)),
+      resource_scope_(std::move(resource_scope)), metrics_(std::move(metrics)) {}
+
+AgentDeploymentState *GrpcAgentService::deployment_state_for(
+    const vektor::agent::v1::AuthorizationScope &scope) const {
+  if (deployment_states_)
+    return &deployment_states_->for_workload(scope.workload_id());
+  return deployment_state_;
+}
+
 grpc::Status
 GrpcAgentService::authorize(const grpc::ServerContext &context,
                             AuthorizationAction action,
@@ -338,17 +353,18 @@ grpc::Status GrpcAgentService::PrepareDeployment(
                                     request->scope(), true);
       !status.ok())
     return status;
-  if (!deployment_state_)
+  if (!deployment_state_ && !deployment_states_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
   try {
+    auto *deployment_state = deployment_state_for(request->scope());
     const auto workload = request->has_workload()
                               ? from_proto(request->workload())
                               : WorkloadSpec{};
     const auto timeout =
         request_timeout(request->operation_timeout_ms(),
                         std::chrono::minutes(5), "operation_timeout_ms");
-    *response = to_proto(deployment_state_->prepare(
+    *response = to_proto(deployment_state->prepare(
         request->deployment_id(), request->artifact(), workload, timeout,
         audit_actor(*context)));
     rollout_metric.succeeded();
@@ -370,10 +386,11 @@ grpc::Status GrpcAgentService::ActivateDeployment(
                                     request->scope(), true);
       !status.ok())
     return status;
-  if (!deployment_state_)
+  if (!deployment_state_ && !deployment_states_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
   try {
+    auto *deployment_state = deployment_state_for(request->scope());
     const auto operation_timeout =
         request_timeout(request->operation_timeout_ms(),
                         std::chrono::minutes(5), "operation_timeout_ms");
@@ -383,7 +400,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     const auto before = state_.latest();
     const auto after_sequence = before ? before->sequence : 0;
     const auto record =
-        deployment_state_->activate(request->deployment_id(), operation_timeout,
+        deployment_state->activate(request->deployment_id(), operation_timeout,
                                     readiness_timeout, audit_actor(*context));
     const auto fresh =
         state_.wait_for_change(after_sequence, readiness_timeout);
@@ -405,7 +422,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
   } catch (const std::exception &error) {
     try {
-      deployment_state_->fail_activation(request->deployment_id(), error.what(),
+      deployment_state_for(request->scope())->fail_activation(request->deployment_id(), error.what(),
                                          audit_actor(*context));
     } catch (...) {
     }
@@ -423,14 +440,15 @@ grpc::Status GrpcAgentService::RollbackDeployment(
                                     request->scope(), true);
       !status.ok())
     return status;
-  if (!deployment_state_)
+  if (!deployment_state_ && !deployment_states_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
   try {
+    auto *deployment_state = deployment_state_for(request->scope());
     const auto timeout =
         request_timeout(request->operation_timeout_ms(),
                         std::chrono::minutes(5), "operation_timeout_ms");
-    *response = to_proto(deployment_state_->rollback(
+    *response = to_proto(deployment_state->rollback(
         request->deployment_id(), timeout, audit_actor(*context)));
     rollout_metric.succeeded();
     return grpc::Status::OK;
@@ -450,10 +468,10 @@ grpc::Status GrpcAgentService::GetDeployment(
                                     request->scope(), true);
       !status.ok())
     return status;
-  if (!deployment_state_)
+  if (!deployment_state_ && !deployment_states_)
     return {grpc::StatusCode::UNIMPLEMENTED,
             "deployment support is not configured"};
-  *response = to_proto(deployment_state_->refresh_observed());
+  *response = to_proto(deployment_state_for(request->scope())->refresh_observed());
   return grpc::Status::OK;
 }
 
@@ -488,8 +506,6 @@ int AgentRunner::run() {
   validate_agent_options(options_);
   install_reload_handler();
   ReloadableCheckConfig health_policy(options_.health_policy_path, config_);
-  auto runtime = std::make_shared<OciRuntimeDriver>(options_.oci_runtime,
-                                                    options_.runtime_container);
   std::shared_ptr<ArtifactVerifier> verifier;
   if (options_.trust_policy_path)
     verifier = std::make_shared<CosignArtifactVerifier>(
@@ -500,16 +516,23 @@ int AgentRunner::run() {
         load_authorization_policy(*options_.authorization_policy_path));
   auto audit = std::make_shared<JsonLinesAuditLog>(options_.audit_log_path);
   auto metrics = std::make_shared<OperationalMetrics>();
-  AgentDeploymentState deployment_state(options_.deployment_state_path,
-                                        std::move(runtime), std::move(verifier),
-                                        std::move(audit));
+  WorkloadDeploymentStates deployment_states(
+      options_.deployment_state_path,
+      [options = options_](const std::string &workload_id) {
+        return std::make_shared<OciRuntimeDriver>(
+            options.oci_runtime,
+            workload_runtime_container_name(options.runtime_container, workload_id));
+      }, verifier, audit);
+  const auto initial_workload = options_.resource_scope.workload_id.empty()
+                                    ? "default" : options_.resource_scope.workload_id;
+  auto &deployment_state = deployment_states.for_workload(initial_workload);
   if (deployment_state.current().phase != DeploymentPhase::Idle ||
       deployment_state.current().operation != ReconciliationOperation::None) {
     const auto restored = deployment_state.refresh_observed();
     if (restored.drift_detected)
       RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
   }
-  GrpcAgentService service(state_, deployment_state, std::move(authorization),
+  GrpcAgentService service(state_, deployment_states, std::move(authorization),
                            options_.resource_scope, metrics);
   grpc::ServerBuilder builder;
   int bound_port = 0;
