@@ -4,6 +4,7 @@
 #include "vektor/authorization.hpp"
 #include "vektor/config.hpp"
 #include "vektor/deployment.hpp"
+#include "vektor/metrics.hpp"
 #include "vektor/status.hpp"
 
 #include <grpcpp/grpcpp.h>
@@ -23,6 +24,7 @@ namespace vektor {
 
 struct AgentOptions {
   std::filesystem::path health_policy_path;
+  std::filesystem::path metrics_path{".vektor/metrics.prom"};
   std::string listen_address{"127.0.0.1:50051"};
   std::chrono::milliseconds interval{5000};
   std::optional<std::filesystem::path> history_path;
@@ -85,7 +87,8 @@ public:
   GrpcAgentService(
       const AgentStatusState &state, AgentDeploymentState &deployment_state,
       std::shared_ptr<const AuthorizationPolicy> authorization = nullptr,
-      AuthorizationScope resource_scope = {});
+      AuthorizationScope resource_scope = {},
+      std::shared_ptr<OperationalMetrics> metrics = nullptr);
 
   grpc::Status GetStatus(grpc::ServerContext *context,
                          const vektor::agent::v1::GetStatusRequest *request,
@@ -120,6 +123,7 @@ private:
   AgentDeploymentState *deployment_state_{nullptr};
   std::shared_ptr<const AuthorizationPolicy> authorization_;
   AuthorizationScope resource_scope_;
+  std::shared_ptr<OperationalMetrics> metrics_;
 };
 
 class AgentRunner {

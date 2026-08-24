@@ -123,6 +123,8 @@ void validate_agent_options(const AgentOptions &options) {
     throw std::invalid_argument("agent interval must be greater than zero");
   if (options.health_policy_path.empty())
     throw std::invalid_argument("health policy path cannot be empty");
+  if (options.metrics_path.empty())
+    throw std::invalid_argument("metrics path cannot be empty");
   if (options.deployment_state_path.empty())
     throw std::invalid_argument("deployment state path cannot be empty");
   if (options.audit_log_path.empty())
@@ -251,10 +253,10 @@ GrpcAgentService::GrpcAgentService(const AgentStatusState &state)
 GrpcAgentService::GrpcAgentService(
     const AgentStatusState &state, AgentDeploymentState &deployment_state,
     std::shared_ptr<const AuthorizationPolicy> authorization,
-    AuthorizationScope resource_scope)
+    AuthorizationScope resource_scope, std::shared_ptr<OperationalMetrics> metrics)
     : state_(state), deployment_state_(&deployment_state),
       authorization_(std::move(authorization)),
-      resource_scope_(std::move(resource_scope)) {}
+      resource_scope_(std::move(resource_scope)), metrics_(std::move(metrics)) {}
 
 grpc::Status
 GrpcAgentService::authorize(const grpc::ServerContext &context,
@@ -273,6 +275,8 @@ GrpcAgentService::authorize(const grpc::ServerContext &context,
       request_matches_resource)
     return grpc::Status::OK;
   const auto detail = authorization_denial_json(action);
+  if (metrics_)
+    metrics_->record_authorization_denial();
   if (deployment_state_) {
     try {
       deployment_state_->audit_authorization_denied(
@@ -459,6 +463,7 @@ int AgentRunner::run() {
     authorization = std::make_shared<const AuthorizationPolicy>(
         load_authorization_policy(*options_.authorization_policy_path));
   auto audit = std::make_shared<JsonLinesAuditLog>(options_.audit_log_path);
+  auto metrics = std::make_shared<OperationalMetrics>();
   AgentDeploymentState deployment_state(options_.deployment_state_path,
                                         std::move(runtime), std::move(verifier),
                                         std::move(audit));
@@ -469,7 +474,7 @@ int AgentRunner::run() {
       RCLCPP_ERROR(node_->get_logger(), "%s", restored.message.c_str());
   }
   GrpcAgentService service(state_, deployment_state, std::move(authorization),
-                           options_.resource_scope);
+                           options_.resource_scope, metrics);
   grpc::ServerBuilder builder;
   int bound_port = 0;
   builder.AddListeningPort(options_.listen_address,
@@ -536,12 +541,16 @@ int AgentRunner::run() {
         }
       }
       state_.publish(std::move(snapshot));
+      const auto latest = state_.latest();
+      if (latest)
+        metrics->record_health(latest->snapshot.state);
 
       if (deployment_state.current().phase != DeploymentPhase::Idle ||
           deployment_state.current().operation !=
               ReconciliationOperation::None) {
         try {
           const auto deployment = deployment_state.refresh_observed();
+          metrics->record_reconciliation(!deployment.drift_detected);
           if (deployment.drift_detected)
             RCLCPP_ERROR(node_->get_logger(), "%s", deployment.message.c_str());
         } catch (const std::exception &error) {
@@ -550,6 +559,8 @@ int AgentRunner::run() {
                        error.what());
         }
       }
+      try { metrics->write_prometheus(options_.metrics_path); }
+      catch (const std::exception &error) { RCLCPP_WARN(node_->get_logger(), "metrics write failed: %s", error.what()); }
 
       const auto next_run = started_at + options_.interval;
       while (!stop.load() && rclcpp::ok() &&

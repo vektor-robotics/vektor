@@ -480,6 +480,12 @@ sudo /usr/lib/vektor/vektor validate --type trust --config /etc/vektor/trust.yam
 sudo /usr/lib/vektor/vektor validate --type authorization --config /etc/vektor/authorization.yaml
 ```
 
+The agent writes fixed-cardinality Prometheus text metrics to
+`/var/lib/vektor/metrics.prom` (override with `--metrics`). Collect that file
+with a host textfile collector; it contains health inspections, authorization
+denials, reconciliation outcomes, and RPC counters/latency totals without
+robot, certificate, or deployment identifiers as labels.
+
 Install the ROS dependencies in a sourced Jazzy shell:
 
 ```bash

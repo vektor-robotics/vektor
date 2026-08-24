@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Bounded Prometheus textfile metrics for agent health, authorization denials,
+  reconciliation outcomes, and RPC activity without unbounded identifiers.
 - Transactional SIGHUP/systemd health-policy reloads that validate candidates,
   retain the last known-good policy on failure, and audit every outcome.
 - Versioned Ubuntu 24.04 package metadata, a least-privilege `vektor` system

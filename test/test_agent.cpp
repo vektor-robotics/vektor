@@ -59,6 +59,23 @@ TEST(AgentOptions, AllowsExplicitLoopbackInsecureMode) {
   EXPECT_NO_THROW(vektor::validate_agent_options(options));
 }
 
+TEST(OperationalMetrics, RendersBoundedPrometheusCounters) {
+  vektor::OperationalMetrics metrics;
+  metrics.record_health(vektor::HealthState::Healthy);
+  metrics.record_authorization_denial();
+  metrics.record_reconciliation(false);
+  metrics.record_rpc(std::chrono::milliseconds(7));
+  const auto rendered = metrics.prometheus();
+  EXPECT_NE(rendered.find("vektor_health_inspections_total{state=\"healthy\"} 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_authorization_denials_total 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_reconciliation_total{outcome=\"failure\"} 1"),
+            std::string::npos);
+  EXPECT_NE(rendered.find("vektor_rpc_latency_milliseconds_total 7"),
+            std::string::npos);
+}
+
 TEST(AgentOptions, RejectsInsecurePublicListener) {
   vektor::AgentOptions options;
   options.health_policy_path = "policy.yaml";

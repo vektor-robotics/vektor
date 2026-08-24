@@ -17,7 +17,7 @@ WorkingDirectory=/var/lib/vektor
 Environment=HOME=/var/lib/vektor
 Environment=ROS_LOG_DIR=/var/log/vektor/ros
 EnvironmentFile=-/etc/vektor/agent.env
-ExecStart=/usr/lib/vektor/vektor agent --config /etc/vektor/policy.yaml --listen 0.0.0.0:50051 --interval-ms 5000 --tls-cert /etc/vektor/tls/agent.crt --tls-key /etc/vektor/tls/agent.key --tls-ca /etc/vektor/tls/client-ca.crt --history /var/lib/vektor/status.jsonl --deployment-state /var/lib/vektor/deployment.yaml --audit-log /var/log/vektor/audit.jsonl --trust-policy /etc/vektor/trust.yaml --authorization-policy /etc/vektor/authorization.yaml --fleet-id ${VEKTOR_FLEET_ID} --workload-id ${VEKTOR_WORKLOAD_ID}
+ExecStart=/usr/lib/vektor/vektor agent --config /etc/vektor/policy.yaml --listen 0.0.0.0:50051 --interval-ms 5000 --tls-cert /etc/vektor/tls/agent.crt --tls-key /etc/vektor/tls/agent.key --tls-ca /etc/vektor/tls/client-ca.crt --history /var/lib/vektor/status.jsonl --deployment-state /var/lib/vektor/deployment.yaml --audit-log /var/log/vektor/audit.jsonl --metrics /var/lib/vektor/metrics.prom --trust-policy /etc/vektor/trust.yaml --authorization-policy /etc/vektor/authorization.yaml --fleet-id ${VEKTOR_FLEET_ID} --workload-id ${VEKTOR_WORKLOAD_ID}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s

@@ -73,6 +73,7 @@ target_link_libraries(vektor_proto PUBLIC protobuf::libprotobuf gRPC::grpc++)
 add_library(vektor_core
   src/config.cpp
   src/health_inspector.cpp
+  src/metrics.cpp
   src/reporter.cpp
   src/status.cpp
 )

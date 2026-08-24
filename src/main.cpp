@@ -47,6 +47,7 @@ struct CliOptions {
   std::optional<std::size_t> limit;
   std::filesystem::path deployment_state{".vektor/deployment.yaml"};
   std::filesystem::path audit_log{".vektor/audit.jsonl"};
+  std::filesystem::path metrics{".vektor/metrics.prom"};
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy;
@@ -164,6 +165,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.deployment_state = next_value(index, argc, argv, argument);
     else if (argument == "--audit-log")
       options.audit_log = next_value(index, argc, argv, argument);
+    else if (argument == "--metrics")
+      options.metrics = next_value(index, argc, argv, argument);
     else if (argument == "--oci-runtime")
       options.oci_runtime = next_value(index, argc, argv, argument);
     else if (argument == "--runtime-container")
@@ -395,6 +398,7 @@ int run_agent(const CliOptions &options, const vektor::CheckConfig &config,
   agent_options.tls_client_ca = options.tls_client_ca;
   agent_options.deployment_state_path = options.deployment_state;
   agent_options.audit_log_path = options.audit_log;
+  agent_options.metrics_path = options.metrics;
   agent_options.oci_runtime = options.oci_runtime;
   agent_options.runtime_container = options.runtime_container;
   agent_options.trust_policy_path = options.trust_policy;
