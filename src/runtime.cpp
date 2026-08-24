@@ -360,6 +360,23 @@ bool is_valid_runtime_container_name(const std::string &value) {
          });
 }
 
+std::string workload_runtime_container_name(const std::string &base_name,
+                                            const std::string &workload_id) {
+  if (!is_valid_runtime_container_name(base_name) || workload_id.empty() ||
+      !std::isalnum(static_cast<unsigned char>(workload_id.front())) ||
+      !std::all_of(workload_id.begin(), workload_id.end(),
+                   [](unsigned char character) {
+                     return std::isalnum(character) || character == '-' ||
+                            character == '_' || character == '.';
+                   }))
+    throw std::invalid_argument("invalid workload runtime container name");
+  const auto name = workload_id == "default" ? base_name
+                                               : base_name + "-" + workload_id;
+  if (!is_valid_runtime_container_name(name))
+    throw std::invalid_argument("invalid workload runtime container name");
+  return name;
+}
+
 OciRuntimeDriver::OciRuntimeDriver(std::string executable,
                                    std::string container_name)
     : executable_(std::move(executable)),

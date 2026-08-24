@@ -101,5 +101,7 @@ private:
 };
 
 bool is_valid_runtime_container_name(const std::string &value);
+std::string workload_runtime_container_name(const std::string &base_name,
+                                            const std::string &workload_id);
 
 } // namespace vektor

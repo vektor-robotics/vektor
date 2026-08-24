@@ -537,6 +537,12 @@ TEST(Runtime, ValidatesManagedContainerName) {
   EXPECT_FALSE(vektor::is_valid_runtime_container_name("-bad"));
   EXPECT_THROW(vektor::OciRuntimeDriver("docker", "bad name"),
                std::invalid_argument);
+  EXPECT_EQ(vektor::workload_runtime_container_name("vektor", "default"),
+            "vektor");
+  EXPECT_EQ(vektor::workload_runtime_container_name("vektor", "camera"),
+            "vektor-camera");
+  EXPECT_THROW(vektor::workload_runtime_container_name("vektor", "../bad"),
+               std::invalid_argument);
 }
 
 TEST(Runtime, ValidatesAndFingerprintsWorkloadSpec) {
