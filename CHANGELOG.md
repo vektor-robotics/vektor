@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Bounded status-history and Prometheus diagnostic collection in the redacted
+  support bundle, with explicit caller-selected paths.
 - Deployment-operation outcome counters in the bounded Prometheus metrics
   file, alongside per-RPC latency totals.
 - A disposable-VM package lifecycle harness for clean install, reboot,

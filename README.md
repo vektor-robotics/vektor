@@ -46,7 +46,8 @@ of the health configuration. The command deliberately excludes configuration
 contents, certificates, private keys, trust/approval files, and audit payloads.
 
 ```bash
-vektor support-bundle --config /etc/vektor/policy.yaml --output /tmp/vektor-support
+vektor support-bundle --config /etc/vektor/policy.yaml --history /var/lib/vektor/status.jsonl \
+  --metrics /var/lib/vektor/metrics.prom --output /tmp/vektor-support
 ```
 
 ## Status snapshots

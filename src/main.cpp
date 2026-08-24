@@ -474,7 +474,7 @@ int run_approval_payload(const CliOptions &options,
   std::cout << vektor::approval_signing_payload(record);
   return 0;
 }
-int run_support_bundle(const CliOptions &options) { vektor::create_support_bundle(options.output_directory, options.config_path); std::cout << "VEKTOR SUPPORT BUNDLE: " << options.output_directory << '\n'; return 0; }
+int run_support_bundle(const CliOptions &options) { vektor::create_support_bundle(options.output_directory, options.config_path, options.history_path.value_or(vektor::default_status_history_path()), options.metrics); std::cout << "VEKTOR SUPPORT BUNDLE: " << options.output_directory << '\n'; return 0; }
 } // namespace
 
 int main(int argc, char **argv) {

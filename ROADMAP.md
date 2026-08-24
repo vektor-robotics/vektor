@@ -179,7 +179,7 @@ real robot without requiring a source checkout.
   automatic retention of the last known-good configuration
 - [x] Export bounded operational metrics for agent health, reconciliation,
   authorization denials, rollout outcomes, and RPC latency
-- [ ] Add a redacted support-bundle command that collects versions,
+- [x] Add a redacted support-bundle command that collects versions,
   configuration fingerprints, status, and recent diagnostics without private
   keys or secret values
 - [ ] Qualify clean install, reboot recovery, package upgrade, package rollback,
