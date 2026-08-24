@@ -128,6 +128,17 @@ private:
   std::shared_ptr<OperationalMetrics> metrics_;
   std::chrono::steady_clock::time_point started_;
 };
+
+class RolloutMetricScope {
+public:
+  explicit RolloutMetricScope(const std::shared_ptr<OperationalMetrics> &metrics)
+      : metrics_(metrics) {}
+  ~RolloutMetricScope() { if (metrics_) metrics_->record_rollout(success_); }
+  void succeeded() { success_ = true; }
+private:
+  std::shared_ptr<OperationalMetrics> metrics_;
+  bool success_{false};
+};
 } // namespace
 
 void validate_agent_options(const AgentOptions &options) {
@@ -323,6 +334,7 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     const vektor::agent::v1::PrepareDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
   RpcMetricScope metric(metrics_);
+  RolloutMetricScope rollout_metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Deploy,
                                     request->scope(), true);
       !status.ok())
@@ -340,6 +352,7 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     *response = to_proto(deployment_state_->prepare(
         request->deployment_id(), request->artifact(), workload, timeout,
         audit_actor(*context)));
+    rollout_metric.succeeded();
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -353,6 +366,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     const vektor::agent::v1::ActivateDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
   RpcMetricScope metric(metrics_);
+  RolloutMetricScope rollout_metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Promote,
                                     request->scope(), true);
       !status.ok())
@@ -386,6 +400,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     *response = to_proto(record);
     response->set_message(record.message + "; fresh ROS health is " +
                           health_state_name(fresh->snapshot.state));
+    rollout_metric.succeeded();
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};
@@ -404,6 +419,7 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     const vektor::agent::v1::RollbackDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
   RpcMetricScope metric(metrics_);
+  RolloutMetricScope rollout_metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Rollback,
                                     request->scope(), true);
       !status.ok())
@@ -417,6 +433,7 @@ grpc::Status GrpcAgentService::RollbackDeployment(
                         std::chrono::minutes(5), "operation_timeout_ms");
     *response = to_proto(deployment_state_->rollback(
         request->deployment_id(), timeout, audit_actor(*context)));
+    rollout_metric.succeeded();
     return grpc::Status::OK;
   } catch (const std::invalid_argument &error) {
     return {grpc::StatusCode::INVALID_ARGUMENT, error.what()};

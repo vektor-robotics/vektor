@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Deployment-operation outcome counters in the bounded Prometheus metrics
+  file, alongside per-RPC latency totals.
 - A disposable-VM package lifecycle harness for clean install, reboot,
   upgrade, rollback, and uninstall qualification.
 - Redacted support bundles containing version metadata and configuration
