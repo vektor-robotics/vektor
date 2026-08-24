@@ -131,6 +131,8 @@ TEST(AgentOptions, RequiresServerBoundScopeForAuthorizationPolicy) {
   EXPECT_THROW(vektor::validate_agent_options(options), std::invalid_argument);
   options.resource_scope = {"warehouse-prod", "picker"};
   EXPECT_NO_THROW(vektor::validate_agent_options(options));
+  options.resource_scope = {"warehouse-prod", ""};
+  EXPECT_NO_THROW(vektor::validate_agent_options(options));
 }
 
 TEST(AgentPolicy, KeepsLastKnownGoodConfigWhenReplacementIsInvalid) {

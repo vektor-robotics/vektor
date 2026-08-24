@@ -164,10 +164,9 @@ void validate_agent_options(const AgentOptions &options) {
       options.authorization_policy_path->empty())
     throw std::invalid_argument("authorization policy path cannot be empty");
   if (options.authorization_policy_path &&
-      (options.resource_scope.fleet_id.empty() ||
-       options.resource_scope.workload_id.empty()))
+      options.resource_scope.fleet_id.empty())
     throw std::invalid_argument(
-        "authorization policy requires --fleet-id and --workload-id");
+        "authorization policy requires --fleet-id");
   if ((!options.resource_scope.fleet_id.empty() &&
        !is_valid_deployment_id(options.resource_scope.fleet_id)) ||
       (!options.resource_scope.workload_id.empty() &&

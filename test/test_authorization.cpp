@@ -143,6 +143,10 @@ TEST(AuthorizationPolicy, BindsRequestsToTheAgentsConfiguredResource) {
       resource, {"warehouse-prod", "sorter"}, true));
   EXPECT_TRUE(vektor::authorization_scope_matches(
       resource, {"warehouse-prod", ""}, false));
+  EXPECT_TRUE(vektor::authorization_scope_matches(
+      {"warehouse-prod", ""}, {"warehouse-prod", "sorter"}, true));
+  EXPECT_FALSE(vektor::authorization_scope_matches(
+      {"warehouse-prod", ""}, {"warehouse-prod", ""}, true));
   EXPECT_FALSE(
       vektor::authorization_scope_matches({}, {"warehouse-prod", ""}, false));
 }
