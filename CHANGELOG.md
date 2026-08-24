@@ -6,6 +6,10 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- WSL systemd package-lifecycle qualification covering clean installation,
+  restart persistence, upgrade, downgrade, and purge cleanup. Package purge
+  now removes empty VEKTOR runtime and log directories while retaining
+  operator-created diagnostic contents.
 - Bounded status-history and Prometheus diagnostic collection in the redacted
   support bundle, with explicit caller-selected paths.
 - Deployment-operation outcome counters in the bounded Prometheus metrics

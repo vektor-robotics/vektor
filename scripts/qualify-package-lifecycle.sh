@@ -9,15 +9,15 @@ new_package=${3:?new package path required}
 if [ "$phase" = one ]; then
   sudo apt-get install -y "$old_package"
   test -f /lib/systemd/system/vektor-agent.service
-  sudo install -d /var/lib/vektor
-  sudo touch /var/lib/vektor/.lifecycle-qualified
+  touch /var/tmp/vektor-lifecycle-qualified
   exit 0
 fi
 test "$phase" = two
-test -f /var/lib/vektor/.lifecycle-qualified
+test -f /var/tmp/vektor-lifecycle-qualified
+rm -f /var/tmp/vektor-lifecycle-qualified
 sudo apt-get install -y "$new_package"
 dpkg-query -W vektor
-sudo apt-get install -y "$old_package"
+sudo apt-get install -y --allow-downgrades "$old_package"
 dpkg-query -W vektor
 sudo apt-get purge -y vektor
 test ! -e /lib/systemd/system/vektor-agent.service

@@ -182,8 +182,14 @@ real robot without requiring a source checkout.
 - [x] Add a redacted support-bundle command that collects versions,
   configuration fingerprints, status, and recent diagnostics without private
   keys or secret values
-- [ ] Qualify clean install, reboot recovery, package upgrade, package rollback,
-  and uninstall behavior in CI or disposable Ubuntu VMs
+- [x] Qualify clean install, reboot recovery, package upgrade, package rollback,
+  and uninstall behavior in a disposable systemd-enabled Ubuntu 24.04 WSL
+  environment
+
+Lifecycle qualification installs a lower-version package, restarts WSL, upgrades
+to the current package, downgrades again, and purges it. Release owners still
+need to verify the signed release artifact on a clean production-equivalent
+Jazzy machine before publishing it.
 
 Definition of done: an operator can install a signed package on a clean Jazzy
 machine, start VEKTOR as a least-privilege service, validate and safely reload
