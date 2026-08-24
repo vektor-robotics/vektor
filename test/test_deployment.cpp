@@ -115,6 +115,16 @@ TEST(Deployment, RequiresDigestPinnedOciArtifact) {
   EXPECT_FALSE(vektor::is_valid_deployment_id(".."));
 }
 
+TEST(Deployment, DerivesIsolatedStableWorkloadStatePaths) {
+  const auto base = std::filesystem::path(".vektor/deployment.yaml");
+  EXPECT_TRUE(vektor::is_valid_workload_id("camera.front-1"));
+  EXPECT_FALSE(vektor::is_valid_workload_id("../escape"));
+  EXPECT_EQ(vektor::workload_state_path(base, "default"), base);
+  EXPECT_EQ(vektor::workload_state_path(base, "camera.front-1"),
+            ".vektor/deployment.camera.front-1.yaml");
+  EXPECT_THROW(vektor::workload_state_path(base, ""), std::invalid_argument);
+}
+
 TEST(Deployment, PersistsPrepareActivateAndRollback) {
   const auto path = std::filesystem::path("vektor_test_deployment.yaml");
   std::filesystem::remove(path);

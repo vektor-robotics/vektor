@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Stable workload-ID validation and deterministic per-workload deployment-state
+  paths, retaining the legacy single-workload state path for `default`.
 - WSL systemd package-lifecycle qualification covering clean installation,
   restart persistence, upgrade, downgrade, and purge cleanup. Package purge
   now removes empty VEKTOR runtime and log directories while retaining

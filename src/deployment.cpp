@@ -240,6 +240,23 @@ bool is_valid_deployment_id(const std::string &value) {
   return valid_deployment_id(value);
 }
 
+bool is_valid_workload_id(const std::string &value) {
+  return valid_deployment_id(value);
+}
+
+std::filesystem::path workload_state_path(const std::filesystem::path &base,
+                                          const std::string &workload_id) {
+  if (base.empty())
+    throw std::invalid_argument("deployment state path cannot be empty");
+  if (!is_valid_workload_id(workload_id))
+    throw std::invalid_argument("invalid workload ID");
+  if (workload_id == "default")
+    return base;
+  const auto extension = base.extension();
+  const auto name = base.stem().string() + "." + workload_id + extension.string();
+  return base.parent_path() / name;
+}
+
 bool is_pinned_oci_artifact(const std::string &artifact) {
   static const std::regex pattern(
       R"(^[A-Za-z0-9][A-Za-z0-9._:-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*@sha256:[0-9a-f]{64}$)");

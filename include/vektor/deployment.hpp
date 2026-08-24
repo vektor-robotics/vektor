@@ -51,6 +51,11 @@ struct DeploymentRecord {
 const char *deployment_phase_name(DeploymentPhase phase);
 const char *reconciliation_operation_name(ReconciliationOperation operation);
 bool is_valid_deployment_id(const std::string &value);
+// Workload IDs share the public deployment-ID grammar. The legacy single
+// workload is named "default" so existing state keeps its original path.
+bool is_valid_workload_id(const std::string &value);
+std::filesystem::path workload_state_path(const std::filesystem::path &base,
+                                          const std::string &workload_id);
 bool is_pinned_oci_artifact(const std::string &artifact);
 
 class AgentDeploymentState {
