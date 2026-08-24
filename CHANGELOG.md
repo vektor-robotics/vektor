@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Redacted support bundles containing version metadata and configuration
+  fingerprints without configuration contents, credentials, or audit payloads.
 - Bounded Prometheus textfile metrics for agent health, authorization denials,
   reconciliation outcomes, and RPC activity without unbounded identifiers.
 - Transactional SIGHUP/systemd health-policy reloads that validate candidates,

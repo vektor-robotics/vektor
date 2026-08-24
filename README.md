@@ -39,6 +39,16 @@ vektor validate --type trust --config config/trust.example.yaml
 JSON output is schema 1 and contains `valid` and `type`; validation failures
 return exit code 2 with the parser's field-specific error.
 
+## Redacted support bundle
+
+Create a fresh support directory with version metadata and a SHA-256 fingerprint
+of the health configuration. The command deliberately excludes configuration
+contents, certificates, private keys, trust/approval files, and audit payloads.
+
+```bash
+vektor support-bundle --config /etc/vektor/policy.yaml --output /tmp/vektor-support
+```
+
 ## Status snapshots
 
 ```bash

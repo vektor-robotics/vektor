@@ -82,7 +82,7 @@ target_include_directories(vektor_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(vektor_core yaml-cpp)
+target_link_libraries(vektor_core yaml-cpp OpenSSL::Crypto)
 ament_target_dependencies(vektor_core
   rclcpp
   rclcpp_action
@@ -189,6 +189,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_status test/test_status.cpp)
   target_link_libraries(test_status vektor_core)
+
+  ament_add_gtest(test_support_bundle test/test_support_bundle.cpp)
+  target_link_libraries(test_support_bundle vektor_core)
 
   ament_add_gtest(test_agent test/test_agent.cpp)
   target_link_libraries(test_agent vektor_agent vektor_proto gRPC::grpc++)
