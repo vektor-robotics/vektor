@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -30,10 +31,16 @@ vektor::StatusSnapshot sample_snapshot() {
 constexpr auto kArtifact =
     "ghcr.io/vektor-robotics/demo@sha256:"
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+constexpr auto kArtifactB =
+    "ghcr.io/vektor-robotics/demo@sha256:"
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 class AuditRuntime final : public vektor::RuntimeDriver {
 public:
-  void prepare(const std::string &) override { ++prepare_calls; }
+  void prepare(const std::string &artifact) override {
+    ++prepare_calls;
+    last_artifact = artifact;
+  }
   vektor::RuntimeObservation activate(const std::string &,
                                       const vektor::WorkloadSpec &) override {
     return {};
@@ -41,6 +48,7 @@ public:
   vektor::RuntimeObservation stop() override { return {}; }
   vektor::RuntimeObservation inspect() override { return {}; }
   int prepare_calls{0};
+  std::string last_artifact;
 };
 
 class RecordingAudit final : public vektor::AuditSink {
@@ -285,4 +293,43 @@ TEST(AgentGrpc, LabelsInsecureDeploymentActorAsUnauthenticatedPeer) {
   EXPECT_NE(audit->events.front().actor.find("127.0.0.1"), std::string::npos);
   server->Shutdown();
   std::filesystem::remove(path);
+}
+
+TEST(AgentGrpc, IsolatesPreparedDeploymentsByWorkloadScope) {
+  const auto path = std::filesystem::path("vektor_test_agent_workloads.yaml");
+  std::filesystem::remove(path);
+  std::filesystem::remove(path.string() + ".workloads");
+  vektor::AgentStatusState health;
+  health.publish(sample_snapshot());
+  std::map<std::string, std::shared_ptr<AuditRuntime>> runtimes;
+  vektor::WorkloadDeploymentStates deployments(
+      path, [&runtimes](const std::string &id) {
+        auto runtime = std::make_shared<AuditRuntime>();
+        runtimes.emplace(id, runtime);
+        return runtime;
+      });
+  vektor::GrpcAgentService service(health, deployments);
+  grpc::ServerBuilder builder;
+  int port = 0;
+  builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(), &port);
+  builder.RegisterService(&service);
+  auto server = builder.BuildAndStart();
+  ASSERT_NE(server, nullptr);
+  auto stub = vektor::agent::v1::Agent::NewStub(
+      grpc::CreateChannel("127.0.0.1:" + std::to_string(port), grpc::InsecureChannelCredentials()));
+  for (const auto &[id, artifact] : std::vector<std::pair<std::string, std::string>>{{"camera", kArtifact}, {"navigation", kArtifactB}}) {
+    grpc::ClientContext context;
+    vektor::agent::v1::PrepareDeploymentRequest request;
+    request.set_deployment_id(id + "-release");
+    request.set_artifact(artifact);
+    request.mutable_scope()->set_workload_id(id);
+    vektor::agent::v1::DeploymentRecord response;
+    EXPECT_TRUE(stub->PrepareDeployment(&context, request, &response).ok());
+  }
+  EXPECT_EQ(runtimes.at("camera")->last_artifact, kArtifact);
+  EXPECT_EQ(runtimes.at("navigation")->last_artifact, kArtifactB);
+  server->Shutdown();
+  std::filesystem::remove(path.string() + ".workloads");
+  std::filesystem::remove(vektor::workload_state_path(path, "camera"));
+  std::filesystem::remove(vektor::workload_state_path(path, "navigation"));
 }
