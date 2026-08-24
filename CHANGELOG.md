@@ -6,6 +6,8 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- A disposable-VM package lifecycle harness for clean install, reboot,
+  upgrade, rollback, and uninstall qualification.
 - Redacted support bundles containing version metadata and configuration
   fingerprints without configuration contents, credentials, or audit payloads.
 - Bounded Prometheus textfile metrics for agent health, authorization denials,
