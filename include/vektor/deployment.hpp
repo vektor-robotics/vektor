@@ -8,10 +8,13 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace vektor {
 
@@ -109,6 +112,35 @@ private:
   mutable std::mutex mutex_;
   bool operation_in_progress_{false};
   DeploymentRecord record_;
+};
+
+// Owns independent deployment state machines for the workloads managed by one
+// agent. Named workloads use isolated state files; the legacy workload keeps
+// the original state path as "default".
+class WorkloadDeploymentStates {
+public:
+  using RuntimeFactory =
+      std::function<std::shared_ptr<RuntimeDriver>(const std::string &)>;
+
+  WorkloadDeploymentStates(std::filesystem::path state_path,
+                           RuntimeFactory runtime_factory,
+                           std::shared_ptr<ArtifactVerifier> verifier = nullptr,
+                           std::shared_ptr<AuditSink> audit = nullptr);
+
+  AgentDeploymentState &for_workload(const std::string &workload_id);
+  std::vector<std::string> workload_ids() const;
+
+private:
+  void load_manifest();
+  void persist_manifest_locked() const;
+
+  std::filesystem::path state_path_;
+  std::filesystem::path manifest_path_;
+  RuntimeFactory runtime_factory_;
+  std::shared_ptr<ArtifactVerifier> verifier_;
+  std::shared_ptr<AuditSink> audit_;
+  mutable std::mutex mutex_;
+  std::map<std::string, std::unique_ptr<AgentDeploymentState>> states_;
 };
 
 vektor::agent::v1::DeploymentRecord to_proto(const DeploymentRecord &record);

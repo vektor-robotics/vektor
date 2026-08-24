@@ -125,6 +125,36 @@ TEST(Deployment, DerivesIsolatedStableWorkloadStatePaths) {
   EXPECT_THROW(vektor::workload_state_path(base, ""), std::invalid_argument);
 }
 
+TEST(Deployment, PersistsIndependentNamedWorkloadStates) {
+  const auto base = std::filesystem::path("vektor_test_workloads.yaml");
+  std::filesystem::remove(base);
+  std::filesystem::remove(base.string() + ".workloads");
+  std::map<std::string, std::shared_ptr<FakeRuntime>> runtimes;
+  const auto factory = [&runtimes](const std::string &id) {
+    auto runtime = std::make_shared<FakeRuntime>();
+    runtimes.emplace(id, runtime);
+    return runtime;
+  };
+  {
+    vektor::WorkloadDeploymentStates states(base, factory);
+    states.for_workload("camera").prepare("camera-release", kArtifact);
+    states.for_workload("navigation").prepare("nav-release", kArtifactB);
+    EXPECT_EQ(states.workload_ids(),
+              (std::vector<std::string>{"camera", "navigation"}));
+    EXPECT_EQ(runtimes.at("camera")->last_artifact, kArtifact);
+    EXPECT_EQ(runtimes.at("navigation")->last_artifact, kArtifactB);
+  }
+  {
+    vektor::WorkloadDeploymentStates restored(base, factory);
+    EXPECT_EQ(restored.for_workload("camera").current().artifact, kArtifact);
+    EXPECT_EQ(restored.for_workload("navigation").current().artifact, kArtifactB);
+  }
+  std::filesystem::remove(base);
+  std::filesystem::remove(vektor::workload_state_path(base, "camera"));
+  std::filesystem::remove(vektor::workload_state_path(base, "navigation"));
+  std::filesystem::remove(base.string() + ".workloads");
+}
+
 TEST(Deployment, PersistsPrepareActivateAndRollback) {
   const auto path = std::filesystem::path("vektor_test_deployment.yaml");
   std::filesystem::remove(path);
