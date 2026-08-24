@@ -177,7 +177,7 @@ real robot without requiring a source checkout.
   authorization, approval, and trust configuration
 - [x] Add transactional agent policy reload with validation, audit events, and
   automatic retention of the last known-good configuration
-- [x] Export bounded operational metrics for agent health, reconciliation,
+- [ ] Export bounded operational metrics for agent health, reconciliation,
   authorization denials, rollout outcomes, and RPC latency
 - [ ] Add a redacted support-bundle command that collects versions,
   configuration fingerprints, status, and recent diagnostics without private

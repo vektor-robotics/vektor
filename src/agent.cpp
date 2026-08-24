@@ -114,6 +114,20 @@ std::string audit_actor(const grpc::ServerContext &context) {
     return "mtls:" + *identity;
   return "unauthenticated:" + context.peer();
 }
+
+class RpcMetricScope {
+public:
+  explicit RpcMetricScope(const std::shared_ptr<OperationalMetrics> &metrics)
+      : metrics_(metrics), started_(std::chrono::steady_clock::now()) {}
+  ~RpcMetricScope() {
+    if (metrics_)
+      metrics_->record_rpc(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started_));
+  }
+private:
+  std::shared_ptr<OperationalMetrics> metrics_;
+  std::chrono::steady_clock::time_point started_;
+};
 } // namespace
 
 void validate_agent_options(const AgentOptions &options) {
@@ -291,6 +305,7 @@ grpc::Status
 GrpcAgentService::GetStatus(grpc::ServerContext *context,
                             const vektor::agent::v1::GetStatusRequest *request,
                             vektor::agent::v1::StatusSnapshot *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Inspect,
                                     request->scope(), false);
       !status.ok())
@@ -307,6 +322,7 @@ grpc::Status GrpcAgentService::PrepareDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::PrepareDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Deploy,
                                     request->scope(), true);
       !status.ok())
@@ -336,6 +352,7 @@ grpc::Status GrpcAgentService::ActivateDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::ActivateDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Promote,
                                     request->scope(), true);
       !status.ok())
@@ -386,6 +403,7 @@ grpc::Status GrpcAgentService::RollbackDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::RollbackDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Rollback,
                                     request->scope(), true);
       !status.ok())
@@ -411,6 +429,7 @@ grpc::Status GrpcAgentService::GetDeployment(
     grpc::ServerContext *context,
     const vektor::agent::v1::GetDeploymentRequest *request,
     vektor::agent::v1::DeploymentRecord *response) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Inspect,
                                     request->scope(), true);
       !status.ok())
@@ -426,6 +445,7 @@ grpc::Status GrpcAgentService::WatchStatus(
     grpc::ServerContext *context,
     const vektor::agent::v1::WatchStatusRequest *request,
     grpc::ServerWriter<vektor::agent::v1::StatusSnapshot> *writer) {
+  RpcMetricScope metric(metrics_);
   if (const auto status = authorize(*context, AuthorizationAction::Inspect,
                                     request->scope(), false);
       !status.ok())
