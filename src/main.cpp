@@ -7,6 +7,7 @@
 #include "vektor/reporter.hpp"
 #include "vektor/rollout.hpp"
 #include "vektor/status.hpp"
+#include "vektor/support_bundle.hpp"
 #include "vektor/trust.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -48,6 +49,7 @@ struct CliOptions {
   std::filesystem::path deployment_state{".vektor/deployment.yaml"};
   std::filesystem::path audit_log{".vektor/audit.jsonl"};
   std::filesystem::path metrics{".vektor/metrics.prom"};
+  std::filesystem::path output_directory;
   std::string oci_runtime{"docker"};
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy;
@@ -87,7 +89,8 @@ struct CliOptions {
                "[--format text|json]\n"
             << "  vektor approval-payload --config <rollout.yaml> "
                "--wave <name> --identity <id>\n"
-            << "                --issued-at <UTC> --expires-at <UTC>\n";
+            << "                --issued-at <UTC> --expires-at <UTC>\n"
+            << "  vektor support-bundle --config <path> --output <new-directory>\n";
   throw std::invalid_argument("invalid command line");
 }
 
@@ -106,6 +109,7 @@ CliOptions parse_cli(int argc, char **argv) {
   if (options.command != "check" && options.command != "status" &&
       options.command != "agent" && options.command != "fleet" &&
       options.command != "validate" &&
+      options.command != "support-bundle" &&
       options.command != "deploy" && options.command != "promote" &&
       options.command != "rollback" && options.command != "approval-payload")
     usage_error("unknown command '" + options.command + "'");
@@ -167,6 +171,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.audit_log = next_value(index, argc, argv, argument);
     else if (argument == "--metrics")
       options.metrics = next_value(index, argc, argv, argument);
+    else if (argument == "--output")
+      options.output_directory = next_value(index, argc, argv, argument);
     else if (argument == "--oci-runtime")
       options.oci_runtime = next_value(index, argc, argv, argument);
     else if (argument == "--runtime-container")
@@ -468,6 +474,7 @@ int run_approval_payload(const CliOptions &options,
   std::cout << vektor::approval_signing_payload(record);
   return 0;
 }
+int run_support_bundle(const CliOptions &options) { vektor::create_support_bundle(options.output_directory, options.config_path); std::cout << "VEKTOR SUPPORT BUNDLE: " << options.output_directory << '\n'; return 0; }
 } // namespace
 
 int main(int argc, char **argv) {
@@ -477,6 +484,8 @@ int main(int argc, char **argv) {
     int exit_code = 0;
     if (options.command == "validate") {
       exit_code = run_validate(options);
+    } else if (options.command == "support-bundle") {
+      exit_code = run_support_bundle(options);
     } else if (options.command == "approval-payload") {
       exit_code = run_approval_payload(
           options, vektor::load_rollout_config(options.config_path));

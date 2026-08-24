@@ -76,6 +76,7 @@ add_library(vektor_core
   src/metrics.cpp
   src/reporter.cpp
   src/status.cpp
+  src/support_bundle.cpp
 )
 target_include_directories(vektor_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
