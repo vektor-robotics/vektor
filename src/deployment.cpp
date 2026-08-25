@@ -125,6 +125,10 @@ WorkloadSpec load_workload(const YAML::Node &node) {
     return spec;
   spec.network = parse_network_mode(node["network"].as<std::string>());
   spec.restart_policy = node["restart_policy"].as<std::string>();
+  if (node["cpu_limit"])
+    spec.cpu_limit = node["cpu_limit"].as<std::string>();
+  if (node["memory_limit"])
+    spec.memory_limit = node["memory_limit"].as<std::string>();
   for (const auto &entry : node["environment"])
     spec.environment.emplace(entry.first.as<std::string>(),
                              entry.second.as<std::string>());
@@ -146,6 +150,8 @@ void emit_workload(YAML::Emitter &output, const char *key,
   output << YAML::Key << key << YAML::Value << YAML::BeginMap << YAML::Key
          << "network" << YAML::Value << network_mode_name(spec.network)
          << YAML::Key << "restart_policy" << YAML::Value << spec.restart_policy
+         << YAML::Key << "cpu_limit" << YAML::Value << spec.cpu_limit
+         << YAML::Key << "memory_limit" << YAML::Value << spec.memory_limit
          << YAML::Key << "environment" << YAML::Value << YAML::BeginMap;
   for (const auto &[name, value] : spec.environment)
     output << YAML::Key << name << YAML::Value << value;
@@ -296,6 +302,9 @@ WorkloadDeploymentStates::WorkloadDeploymentStates(
   if (!runtime_factory_)
     throw std::invalid_argument("workload runtime factory is required");
   load_manifest();
+  // Preserve a pre-v1.2 single-workload state as the default workload.
+  if (states_.empty() && std::filesystem::exists(state_path_))
+    for_workload("default");
 }
 
 void WorkloadDeploymentStates::load_manifest() {
@@ -890,6 +899,8 @@ vektor::agent::v1::RuntimeWorkloadSpec to_proto(const WorkloadSpec &spec) {
   vektor::agent::v1::RuntimeWorkloadSpec result;
   result.set_network(proto_network(spec.network));
   result.set_restart_policy(spec.restart_policy);
+  result.set_cpu_limit(spec.cpu_limit);
+  result.set_memory_limit(spec.memory_limit);
   for (const auto &[name, value] : spec.environment) {
     auto *item = result.add_environment();
     item->set_name(name);
@@ -935,6 +946,8 @@ WorkloadSpec from_proto(const vektor::agent::v1::RuntimeWorkloadSpec &proto,
     spec.restart_policy = proto.restart_policy();
   else if (!use_defaults_for_unspecified)
     throw std::invalid_argument("runtime restart policy is required");
+  spec.cpu_limit = proto.cpu_limit();
+  spec.memory_limit = proto.memory_limit();
   for (const auto &item : proto.environment()) {
     if (!spec.environment.emplace(item.name(), item.value()).second)
       throw std::invalid_argument("duplicate environment variable '" +

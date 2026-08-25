@@ -34,6 +34,9 @@ constexpr auto kArtifact =
 constexpr auto kArtifactB =
     "ghcr.io/vektor-robotics/demo@sha256:"
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+constexpr auto kArtifactC =
+    "ghcr.io/vektor-robotics/demo@sha256:"
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
 class AuditRuntime final : public vektor::RuntimeDriver {
 public:
@@ -41,13 +44,27 @@ public:
     ++prepare_calls;
     last_artifact = artifact;
   }
-  vektor::RuntimeObservation activate(const std::string &,
-                                      const vektor::WorkloadSpec &) override {
+  vektor::RuntimeObservation activate(
+      const std::string &artifact, const vektor::WorkloadSpec &spec) override {
+    ++activate_calls;
+    last_artifact = artifact;
+    return {true, true, artifact, "runtime-" + artifact.substr(artifact.size() - 8),
+            true, vektor::workload_fingerprint(spec), "healthy"};
+  }
+  vektor::RuntimeObservation stop() override {
+    ++stop_calls;
     return {};
   }
-  vektor::RuntimeObservation stop() override { return {}; }
-  vektor::RuntimeObservation inspect() override { return {}; }
+  vektor::RuntimeObservation inspect() override {
+    return {activate_calls > stop_calls, activate_calls > stop_calls,
+            activate_calls > stop_calls ? last_artifact : "",
+            activate_calls > stop_calls ? "runtime" : "", activate_calls > stop_calls,
+            vektor::workload_fingerprint({}),
+            activate_calls > stop_calls ? "healthy" : "stopped"};
+  }
   int prepare_calls{0};
+  int activate_calls{0};
+  int stop_calls{0};
   std::string last_artifact;
 };
 
@@ -317,7 +334,7 @@ TEST(AgentGrpc, IsolatesPreparedDeploymentsByWorkloadScope) {
   ASSERT_NE(server, nullptr);
   auto stub = vektor::agent::v1::Agent::NewStub(
       grpc::CreateChannel("127.0.0.1:" + std::to_string(port), grpc::InsecureChannelCredentials()));
-  for (const auto &[id, artifact] : std::vector<std::pair<std::string, std::string>>{{"camera", kArtifact}, {"navigation", kArtifactB}}) {
+  for (const auto &[id, artifact] : std::vector<std::pair<std::string, std::string>>{{"camera", kArtifact}, {"navigation", kArtifactB}, {"lidar", kArtifactC}}) {
     grpc::ClientContext context;
     vektor::agent::v1::PrepareDeploymentRequest request;
     request.set_deployment_id(id + "-release");
@@ -328,8 +345,48 @@ TEST(AgentGrpc, IsolatesPreparedDeploymentsByWorkloadScope) {
   }
   EXPECT_EQ(runtimes.at("camera")->last_artifact, kArtifact);
   EXPECT_EQ(runtimes.at("navigation")->last_artifact, kArtifactB);
+  EXPECT_EQ(runtimes.at("lidar")->last_artifact, kArtifactC);
+
+  for (const auto &id : {std::string("camera"), std::string("navigation"),
+                         std::string("lidar")}) {
+    std::thread health_update([&health] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      auto snapshot = sample_snapshot();
+      snapshot.state = vektor::HealthState::Healthy;
+      health.publish(std::move(snapshot));
+    });
+    grpc::ClientContext context;
+    vektor::agent::v1::ActivateDeploymentRequest request;
+    request.set_deployment_id(id + "-release");
+    request.set_allow_degraded(true);
+    request.mutable_scope()->set_workload_id(id);
+    vektor::agent::v1::DeploymentRecord response;
+    const auto status = stub->ActivateDeployment(&context, request, &response);
+    health_update.join();
+    ASSERT_TRUE(status.ok()) << status.error_message();
+    EXPECT_EQ(response.phase(),
+              vektor::agent::v1::DEPLOYMENT_PHASE_ACTIVE);
+  }
+  EXPECT_EQ(runtimes.at("camera")->activate_calls, 1);
+  EXPECT_EQ(runtimes.at("navigation")->activate_calls, 1);
+  EXPECT_EQ(runtimes.at("lidar")->activate_calls, 1);
+
+  {
+    grpc::ClientContext context;
+    vektor::agent::v1::RollbackDeploymentRequest request;
+    request.set_deployment_id("camera-release");
+    request.mutable_scope()->set_workload_id("camera");
+    vektor::agent::v1::DeploymentRecord response;
+    const auto status = stub->RollbackDeployment(&context, request, &response);
+    ASSERT_TRUE(status.ok()) << status.error_message();
+    EXPECT_EQ(response.phase(), vektor::agent::v1::DEPLOYMENT_PHASE_ROLLED_BACK);
+  }
+  EXPECT_EQ(runtimes.at("camera")->stop_calls, 1);
+  EXPECT_EQ(runtimes.at("navigation")->stop_calls, 0);
+  EXPECT_EQ(runtimes.at("lidar")->stop_calls, 0);
   server->Shutdown();
   std::filesystem::remove(path.string() + ".workloads");
   std::filesystem::remove(vektor::workload_state_path(path, "camera"));
   std::filesystem::remove(vektor::workload_state_path(path, "navigation"));
+  std::filesystem::remove(vektor::workload_state_path(path, "lidar"));
 }

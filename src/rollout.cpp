@@ -61,7 +61,8 @@ WorkloadSpec parse_workload(const YAML::Node &node) {
   if (!node)
     return spec;
   reject_unknown(node,
-                 {"network", "restart_policy", "environment", "mounts",
+                 {"network", "restart_policy", "cpu_limit", "memory_limit",
+                  "environment", "mounts",
                   "devices", "command"},
                  "workload");
   if (node["network"])
@@ -70,6 +71,11 @@ WorkloadSpec parse_workload(const YAML::Node &node) {
   if (node["restart_policy"])
     spec.restart_policy =
         require_string(node["restart_policy"], "workload.restart_policy");
+  if (node["cpu_limit"])
+    spec.cpu_limit = require_string(node["cpu_limit"], "workload.cpu_limit");
+  if (node["memory_limit"])
+    spec.memory_limit =
+        require_string(node["memory_limit"], "workload.memory_limit");
   if (const auto environment = node["environment"]; environment) {
     if (!environment.IsMap())
       invalid("workload.environment", "expected a mapping");

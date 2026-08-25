@@ -155,6 +155,29 @@ TEST(Deployment, PersistsIndependentNamedWorkloadStates) {
   std::filesystem::remove(base.string() + ".workloads");
 }
 
+TEST(Deployment, MigratesLegacySingleWorkloadStateToDefaultRegistryEntry) {
+  const auto base = std::filesystem::path("vektor_test_legacy_state.yaml");
+  std::filesystem::remove(base);
+  std::filesystem::remove(base.string() + ".workloads");
+  auto legacy_runtime = std::make_shared<FakeRuntime>();
+  {
+    vektor::AgentDeploymentState legacy(base, legacy_runtime);
+    ASSERT_EQ(legacy.prepare("legacy-release", kArtifact).phase,
+              vektor::DeploymentPhase::Staged);
+  }
+  std::map<std::string, std::shared_ptr<FakeRuntime>> runtimes;
+  vektor::WorkloadDeploymentStates restored(
+      base, [&runtimes](const std::string &id) {
+        auto runtime = std::make_shared<FakeRuntime>();
+        runtimes.emplace(id, runtime);
+        return runtime;
+      });
+  ASSERT_EQ(restored.workload_ids(), std::vector<std::string>{"default"});
+  EXPECT_EQ(restored.for_workload("default").current().artifact, kArtifact);
+  std::filesystem::remove(base);
+  std::filesystem::remove(base.string() + ".workloads");
+}
+
 TEST(Deployment, PersistsPrepareActivateAndRollback) {
   const auto path = std::filesystem::path("vektor_test_deployment.yaml");
   std::filesystem::remove(path);
@@ -548,6 +571,8 @@ TEST(Runtime, ValidatesManagedContainerName) {
 TEST(Runtime, ValidatesAndFingerprintsWorkloadSpec) {
   vektor::WorkloadSpec spec;
   spec.environment = {{"MODE", "production"}, {"ROS_DOMAIN_ID", "42"}};
+  spec.cpu_limit = "1.5";
+  spec.memory_limit = "512M";
   spec.mounts.push_back({"/var/lib/vektor", "/data", true});
   spec.devices.push_back({"/dev/video0", "/dev/video0"});
   spec.command = {"robot", "--safe"};
@@ -561,12 +586,20 @@ TEST(Runtime, ValidatesAndFingerprintsWorkloadSpec) {
   invalid = spec;
   invalid.mounts.push_back({"relative", "/other", false});
   EXPECT_THROW(vektor::validate_workload_spec(invalid), std::invalid_argument);
+  invalid = spec;
+  invalid.cpu_limit = "0";
+  EXPECT_THROW(vektor::validate_workload_spec(invalid), std::invalid_argument);
+  invalid = spec;
+  invalid.memory_limit = "512";
+  EXPECT_THROW(vektor::validate_workload_spec(invalid), std::invalid_argument);
 }
 
 TEST(Runtime, WorkloadProtoRoundTrips) {
   vektor::WorkloadSpec expected;
   expected.network = vektor::NetworkMode::None;
   expected.restart_policy = "on-failure";
+  expected.cpu_limit = "2";
+  expected.memory_limit = "1G";
   expected.environment["MODE"] = "test";
   expected.mounts.push_back({"/source", "/target", true});
   expected.devices.push_back({"/dev/input0", "/dev/input0"});

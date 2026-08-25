@@ -98,6 +98,8 @@ message RuntimeWorkloadSpec {
   repeated BindMount mounts = 4;
   repeated DeviceMapping devices = 5;
   repeated string command = 6;
+  string cpu_limit = 15;
+  string memory_limit = 16;
 }
 
 message DeploymentRecord {

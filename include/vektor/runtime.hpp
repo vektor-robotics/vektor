@@ -27,6 +27,8 @@ struct DeviceMapping {
 struct WorkloadSpec {
   NetworkMode network{NetworkMode::Host};
   std::string restart_policy{"unless-stopped"};
+  std::string cpu_limit;
+  std::string memory_limit;
   std::map<std::string, std::string> environment;
   std::vector<BindMount> mounts;
   std::vector<DeviceMapping> devices;

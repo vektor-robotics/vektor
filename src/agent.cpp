@@ -309,7 +309,8 @@ GrpcAgentService::authorize(const grpc::ServerContext &context,
       resource_scope_, {scope.fleet_id(), scope.workload_id()},
       require_workload);
   if (identity &&
-      authorization_->allows(*identity, action, resource_scope_,
+      authorization_->allows(*identity, action,
+                             {scope.fleet_id(), scope.workload_id()},
                              require_workload) &&
       request_matches_resource)
     return grpc::Status::OK;
