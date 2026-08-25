@@ -41,6 +41,8 @@ constexpr auto kArtifactC =
 class AuditRuntime final : public vektor::RuntimeDriver {
 public:
   void prepare(const std::string &artifact) override {
+    if (fail_prepare)
+      throw std::runtime_error("simulated workload pull failure");
     ++prepare_calls;
     last_artifact = artifact;
   }
@@ -56,16 +58,22 @@ public:
     return {};
   }
   vektor::RuntimeObservation inspect() override {
+    if (crash_on_inspect)
+      throw std::runtime_error("simulated runtime inspection crash");
     return {activate_calls > stop_calls, activate_calls > stop_calls,
             activate_calls > stop_calls ? last_artifact : "",
             activate_calls > stop_calls ? "runtime" : "", activate_calls > stop_calls,
-            vektor::workload_fingerprint({}),
+            inspection_fingerprint.empty() ? vektor::workload_fingerprint({})
+                                            : inspection_fingerprint,
             activate_calls > stop_calls ? "healthy" : "stopped"};
   }
   int prepare_calls{0};
   int activate_calls{0};
   int stop_calls{0};
   std::string last_artifact;
+  bool fail_prepare{false};
+  bool crash_on_inspect{false};
+  std::string inspection_fingerprint;
 };
 
 class RecordingAudit final : public vektor::AuditSink {
@@ -82,6 +90,55 @@ TEST(AgentOptions, AllowsExplicitLoopbackInsecureMode) {
   options.health_policy_path = "policy.yaml";
   options.insecure = true;
   EXPECT_NO_THROW(vektor::validate_agent_options(options));
+}
+
+TEST(AgentDeployment, HandlesConcurrentThreeWorkloadPartialFailureAndDrift) {
+  const auto path = std::filesystem::path("vektor_test_agent_concurrent.yaml");
+  std::filesystem::remove(path);
+  std::filesystem::remove(path.string() + ".workloads");
+  std::map<std::string, std::shared_ptr<AuditRuntime>> runtimes{
+      {"camera", std::make_shared<AuditRuntime>()},
+      {"navigation", std::make_shared<AuditRuntime>()},
+      {"lidar", std::make_shared<AuditRuntime>()}};
+  vektor::WorkloadDeploymentStates deployments(
+      path, [&runtimes](const std::string &id) {
+        auto runtime = runtimes.at(id);
+        runtime->fail_prepare = id == "lidar";
+        return runtime;
+      });
+  const auto prepare = [&deployments](const std::string &id,
+                                      const std::string &artifact) {
+    auto &state = deployments.for_workload(id);
+    try {
+      return state.prepare(id + "-release", artifact);
+    } catch (...) {
+      return state.current();
+    }
+  };
+  auto camera = std::async(std::launch::async, prepare, "camera", kArtifact);
+  auto navigation =
+      std::async(std::launch::async, prepare, "navigation", kArtifactB);
+  auto lidar = std::async(std::launch::async, prepare, "lidar", kArtifactC);
+  EXPECT_EQ(camera.get().phase, vektor::DeploymentPhase::Staged);
+  EXPECT_EQ(navigation.get().phase, vektor::DeploymentPhase::Staged);
+  EXPECT_EQ(lidar.get().phase, vektor::DeploymentPhase::Failed);
+  ASSERT_EQ(deployments.for_workload("camera").activate("camera-release").phase,
+            vektor::DeploymentPhase::Active);
+  runtimes.at("camera")->inspection_fingerprint = "tampered";
+  EXPECT_TRUE(deployments.for_workload("camera").refresh_observed().drift_detected);
+  runtimes.at("camera")->crash_on_inspect = true;
+  const auto crashed = deployments.for_workload("camera").refresh_observed();
+  EXPECT_EQ(crashed.phase, vektor::DeploymentPhase::Failed);
+  EXPECT_TRUE(crashed.message.find("inspection failed") != std::string::npos);
+  EXPECT_EQ(deployments.for_workload("navigation").current().phase,
+            vektor::DeploymentPhase::Staged);
+  EXPECT_EQ(runtimes.at("camera")->prepare_calls, 1);
+  EXPECT_EQ(runtimes.at("navigation")->prepare_calls, 1);
+  EXPECT_EQ(runtimes.at("lidar")->prepare_calls, 0);
+  std::filesystem::remove(path.string() + ".workloads");
+  std::filesystem::remove(vektor::workload_state_path(path, "camera"));
+  std::filesystem::remove(vektor::workload_state_path(path, "navigation"));
+  std::filesystem::remove(vektor::workload_state_path(path, "lidar"));
 }
 
 TEST(OperationalMetrics, RendersBoundedPrometheusCounters) {
