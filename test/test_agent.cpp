@@ -58,6 +58,8 @@ public:
     return {};
   }
   vektor::RuntimeObservation inspect() override {
+    if (crash_on_inspect)
+      throw std::runtime_error("simulated runtime inspection crash");
     return {activate_calls > stop_calls, activate_calls > stop_calls,
             activate_calls > stop_calls ? last_artifact : "",
             activate_calls > stop_calls ? "runtime" : "", activate_calls > stop_calls,
@@ -70,6 +72,7 @@ public:
   int stop_calls{0};
   std::string last_artifact;
   bool fail_prepare{false};
+  bool crash_on_inspect{false};
   std::string inspection_fingerprint;
 };
 
@@ -123,6 +126,12 @@ TEST(AgentDeployment, HandlesConcurrentThreeWorkloadPartialFailureAndDrift) {
             vektor::DeploymentPhase::Active);
   runtimes.at("camera")->inspection_fingerprint = "tampered";
   EXPECT_TRUE(deployments.for_workload("camera").refresh_observed().drift_detected);
+  runtimes.at("camera")->crash_on_inspect = true;
+  const auto crashed = deployments.for_workload("camera").refresh_observed();
+  EXPECT_EQ(crashed.phase, vektor::DeploymentPhase::Failed);
+  EXPECT_TRUE(crashed.message.find("inspection failed") != std::string::npos);
+  EXPECT_EQ(deployments.for_workload("navigation").current().phase,
+            vektor::DeploymentPhase::Staged);
   EXPECT_EQ(runtimes.at("camera")->prepare_calls, 1);
   EXPECT_EQ(runtimes.at("navigation")->prepare_calls, 1);
   EXPECT_EQ(runtimes.at("lidar")->prepare_calls, 0);

@@ -212,7 +212,7 @@ health gates and rollback boundaries.
 - [x] Add CPU, memory, and runtime resource limits to the strict workload spec
 - [x] Migrate existing single-workload state without manual edits or loss of the
   previous rollback target
-- [ ] Add crash, drift, partial-failure, and concurrent-rollout integration
+- [x] Add crash, drift, partial-failure, and concurrent-rollout integration
   coverage for at least three workloads per agent
 
 Definition of done: a fleet can independently roll out and roll back three

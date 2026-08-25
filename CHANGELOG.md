@@ -14,6 +14,8 @@ All notable changes to VEKTOR are documented here.
   workload when a v1.2 registry is first opened.
 - Three-workload integration coverage for concurrent preparation, isolated
   partial failure, and post-activation runtime drift.
+- Three-workload runtime inspection crash coverage confirming failed recovery
+  is isolated and does not alter unaffected workload state.
 - Stable workload-ID validation and deterministic per-workload deployment-state
   paths, retaining the legacy single-workload state path for `default`.
 - A versioned workload-state registry that persists managed workload identities
