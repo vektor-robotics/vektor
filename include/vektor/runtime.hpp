@@ -27,6 +27,8 @@ struct DeviceMapping {
 struct WorkloadSpec {
   NetworkMode network{NetworkMode::Host};
   std::string restart_policy{"unless-stopped"};
+  std::string cpu_limit;
+  std::string memory_limit;
   std::map<std::string, std::string> environment;
   std::vector<BindMount> mounts;
   std::vector<DeviceMapping> devices;
@@ -101,5 +103,7 @@ private:
 };
 
 bool is_valid_runtime_container_name(const std::string &value);
+std::string workload_runtime_container_name(const std::string &base_name,
+                                            const std::string &workload_id);
 
 } // namespace vektor

@@ -89,6 +89,11 @@ public:
       std::shared_ptr<const AuthorizationPolicy> authorization = nullptr,
       AuthorizationScope resource_scope = {},
       std::shared_ptr<OperationalMetrics> metrics = nullptr);
+  GrpcAgentService(
+      const AgentStatusState &state, WorkloadDeploymentStates &deployment_states,
+      std::shared_ptr<const AuthorizationPolicy> authorization = nullptr,
+      AuthorizationScope resource_scope = {},
+      std::shared_ptr<OperationalMetrics> metrics = nullptr);
 
   grpc::Status GetStatus(grpc::ServerContext *context,
                          const vektor::agent::v1::GetStatusRequest *request,
@@ -119,8 +124,11 @@ private:
                          AuthorizationAction action,
                          const vektor::agent::v1::AuthorizationScope &scope,
                          bool require_workload) const;
+  AgentDeploymentState *deployment_state_for(
+      const vektor::agent::v1::AuthorizationScope &scope) const;
   const AgentStatusState &state_;
   AgentDeploymentState *deployment_state_{nullptr};
+  WorkloadDeploymentStates *deployment_states_{nullptr};
   std::shared_ptr<const AuthorizationPolicy> authorization_;
   AuthorizationScope resource_scope_;
   std::shared_ptr<OperationalMetrics> metrics_;

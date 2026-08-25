@@ -203,14 +203,14 @@ an upgrade and rollback without losing deployment or audit state.
 Remove the one-managed-container-per-agent limit while preserving independent
 health gates and rollback boundaries.
 
-- [ ] Introduce stable workload identities and per-workload desired, observed,
+- [x] Introduce stable workload identities and per-workload desired, observed,
   previous, reconciliation, and audit state
-- [ ] Extend authorization and rollout targeting so one identity can receive
+- [x] Extend authorization and rollout targeting so one identity can receive
   different roles and scopes for different workloads on the same robot
-- [ ] Reconcile, inspect, deploy, and roll back named workloads independently
+- [x] Reconcile, inspect, deploy, and roll back named workloads independently
   without restarting or mutating unaffected workloads
-- [ ] Add CPU, memory, and runtime resource limits to the strict workload spec
-- [ ] Migrate existing single-workload state without manual edits or loss of the
+- [x] Add CPU, memory, and runtime resource limits to the strict workload spec
+- [x] Migrate existing single-workload state without manual edits or loss of the
   previous rollback target
 - [ ] Add crash, drift, partial-failure, and concurrent-rollout integration
   coverage for at least three workloads per agent

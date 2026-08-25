@@ -271,6 +271,15 @@ void validate_workload_spec(const WorkloadSpec &spec) {
   if (!restart_policies.contains(spec.restart_policy))
     throw std::invalid_argument(
         "restart_policy must be no, always, unless-stopped, or on-failure");
+  const std::regex cpu_limit_pattern(R"(^[1-9][0-9]*(\.[0-9]+)?$)");
+  const std::regex memory_limit_pattern(
+      R"(^[1-9][0-9]*(B|K|KB|M|MB|G|GB|T|TB)$)");
+  if ((!spec.cpu_limit.empty() &&
+       !std::regex_match(spec.cpu_limit, cpu_limit_pattern)) ||
+      (!spec.memory_limit.empty() &&
+       !std::regex_match(spec.memory_limit, memory_limit_pattern)))
+    throw std::invalid_argument(
+        "resource limits must use positive CPU or memory quantities");
   for (const auto &[name, value] : spec.environment) {
     if (!std::regex_match(name, environment_name))
       throw std::invalid_argument("invalid environment variable name '" + name +
@@ -324,6 +333,8 @@ std::string workload_fingerprint(const WorkloadSpec &spec) {
   std::ostringstream out;
   append_fingerprint_value(out, network_mode_name(spec.network));
   append_fingerprint_value(out, spec.restart_policy);
+  append_fingerprint_value(out, spec.cpu_limit);
+  append_fingerprint_value(out, spec.memory_limit);
   for (const auto &[name, value] : spec.environment) {
     append_fingerprint_value(out, name);
     append_fingerprint_value(out, value);
@@ -358,6 +369,23 @@ bool is_valid_runtime_container_name(const std::string &value) {
            return std::isalnum(character) || character == '_' ||
                   character == '.' || character == '-';
          });
+}
+
+std::string workload_runtime_container_name(const std::string &base_name,
+                                            const std::string &workload_id) {
+  if (!is_valid_runtime_container_name(base_name) || workload_id.empty() ||
+      !std::isalnum(static_cast<unsigned char>(workload_id.front())) ||
+      !std::all_of(workload_id.begin(), workload_id.end(),
+                   [](unsigned char character) {
+                     return std::isalnum(character) || character == '-' ||
+                            character == '_' || character == '.';
+                   }))
+    throw std::invalid_argument("invalid workload runtime container name");
+  const auto name = workload_id == "default" ? base_name
+                                               : base_name + "-" + workload_id;
+  if (!is_valid_runtime_container_name(name))
+    throw std::invalid_argument("invalid workload runtime container name");
+  return name;
 }
 
 OciRuntimeDriver::OciRuntimeDriver(std::string executable,
@@ -418,6 +446,14 @@ OciRuntimeDriver::activate(const std::string &artifact,
       "--restart", spec.restart_policy,
       "--label",   "io.vektor.managed=true",
       "--label",   "io.vektor.workload=" + workload_fingerprint(spec)};
+  if (!spec.cpu_limit.empty()) {
+    arguments.push_back("--cpus");
+    arguments.push_back(spec.cpu_limit);
+  }
+  if (!spec.memory_limit.empty()) {
+    arguments.push_back("--memory");
+    arguments.push_back(spec.memory_limit);
+  }
   for (const auto &[name, value] : spec.environment) {
     arguments.push_back("--env");
     arguments.push_back(name + "=" + value);

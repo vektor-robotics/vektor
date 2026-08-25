@@ -89,8 +89,10 @@ bool authorization_scope_matches(const AuthorizationScope &resource,
                                  const AuthorizationScope &request,
                                  bool require_workload) {
   return !resource.fleet_id.empty() && resource.fleet_id == request.fleet_id &&
-         (!require_workload || (!resource.workload_id.empty() &&
-                                resource.workload_id == request.workload_id));
+         (!require_workload ||
+          (!request.workload_id.empty() &&
+           (resource.workload_id.empty() ||
+            resource.workload_id == request.workload_id)));
 }
 
 bool AuthorizationPolicy::allows(const std::string &authenticated_identity,

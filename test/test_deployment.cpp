@@ -115,6 +115,69 @@ TEST(Deployment, RequiresDigestPinnedOciArtifact) {
   EXPECT_FALSE(vektor::is_valid_deployment_id(".."));
 }
 
+TEST(Deployment, DerivesIsolatedStableWorkloadStatePaths) {
+  const auto base = std::filesystem::path(".vektor/deployment.yaml");
+  EXPECT_TRUE(vektor::is_valid_workload_id("camera.front-1"));
+  EXPECT_FALSE(vektor::is_valid_workload_id("../escape"));
+  EXPECT_EQ(vektor::workload_state_path(base, "default"), base);
+  EXPECT_EQ(vektor::workload_state_path(base, "camera.front-1"),
+            ".vektor/deployment.camera.front-1.yaml");
+  EXPECT_THROW(vektor::workload_state_path(base, ""), std::invalid_argument);
+}
+
+TEST(Deployment, PersistsIndependentNamedWorkloadStates) {
+  const auto base = std::filesystem::path("vektor_test_workloads.yaml");
+  std::filesystem::remove(base);
+  std::filesystem::remove(base.string() + ".workloads");
+  std::map<std::string, std::shared_ptr<FakeRuntime>> runtimes;
+  const auto factory = [&runtimes](const std::string &id) {
+    auto runtime = std::make_shared<FakeRuntime>();
+    runtimes.emplace(id, runtime);
+    return runtime;
+  };
+  {
+    vektor::WorkloadDeploymentStates states(base, factory);
+    states.for_workload("camera").prepare("camera-release", kArtifact);
+    states.for_workload("navigation").prepare("nav-release", kArtifactB);
+    EXPECT_EQ(states.workload_ids(),
+              (std::vector<std::string>{"camera", "navigation"}));
+    EXPECT_EQ(runtimes.at("camera")->last_artifact, kArtifact);
+    EXPECT_EQ(runtimes.at("navigation")->last_artifact, kArtifactB);
+  }
+  {
+    vektor::WorkloadDeploymentStates restored(base, factory);
+    EXPECT_EQ(restored.for_workload("camera").current().artifact, kArtifact);
+    EXPECT_EQ(restored.for_workload("navigation").current().artifact, kArtifactB);
+  }
+  std::filesystem::remove(base);
+  std::filesystem::remove(vektor::workload_state_path(base, "camera"));
+  std::filesystem::remove(vektor::workload_state_path(base, "navigation"));
+  std::filesystem::remove(base.string() + ".workloads");
+}
+
+TEST(Deployment, MigratesLegacySingleWorkloadStateToDefaultRegistryEntry) {
+  const auto base = std::filesystem::path("vektor_test_legacy_state.yaml");
+  std::filesystem::remove(base);
+  std::filesystem::remove(base.string() + ".workloads");
+  auto legacy_runtime = std::make_shared<FakeRuntime>();
+  {
+    vektor::AgentDeploymentState legacy(base, legacy_runtime);
+    ASSERT_EQ(legacy.prepare("legacy-release", kArtifact).phase,
+              vektor::DeploymentPhase::Staged);
+  }
+  std::map<std::string, std::shared_ptr<FakeRuntime>> runtimes;
+  vektor::WorkloadDeploymentStates restored(
+      base, [&runtimes](const std::string &id) {
+        auto runtime = std::make_shared<FakeRuntime>();
+        runtimes.emplace(id, runtime);
+        return runtime;
+      });
+  ASSERT_EQ(restored.workload_ids(), std::vector<std::string>{"default"});
+  EXPECT_EQ(restored.for_workload("default").current().artifact, kArtifact);
+  std::filesystem::remove(base);
+  std::filesystem::remove(base.string() + ".workloads");
+}
+
 TEST(Deployment, PersistsPrepareActivateAndRollback) {
   const auto path = std::filesystem::path("vektor_test_deployment.yaml");
   std::filesystem::remove(path);
@@ -497,11 +560,19 @@ TEST(Runtime, ValidatesManagedContainerName) {
   EXPECT_FALSE(vektor::is_valid_runtime_container_name("-bad"));
   EXPECT_THROW(vektor::OciRuntimeDriver("docker", "bad name"),
                std::invalid_argument);
+  EXPECT_EQ(vektor::workload_runtime_container_name("vektor", "default"),
+            "vektor");
+  EXPECT_EQ(vektor::workload_runtime_container_name("vektor", "camera"),
+            "vektor-camera");
+  EXPECT_THROW(vektor::workload_runtime_container_name("vektor", "../bad"),
+               std::invalid_argument);
 }
 
 TEST(Runtime, ValidatesAndFingerprintsWorkloadSpec) {
   vektor::WorkloadSpec spec;
   spec.environment = {{"MODE", "production"}, {"ROS_DOMAIN_ID", "42"}};
+  spec.cpu_limit = "1.5";
+  spec.memory_limit = "512M";
   spec.mounts.push_back({"/var/lib/vektor", "/data", true});
   spec.devices.push_back({"/dev/video0", "/dev/video0"});
   spec.command = {"robot", "--safe"};
@@ -515,12 +586,20 @@ TEST(Runtime, ValidatesAndFingerprintsWorkloadSpec) {
   invalid = spec;
   invalid.mounts.push_back({"relative", "/other", false});
   EXPECT_THROW(vektor::validate_workload_spec(invalid), std::invalid_argument);
+  invalid = spec;
+  invalid.cpu_limit = "0";
+  EXPECT_THROW(vektor::validate_workload_spec(invalid), std::invalid_argument);
+  invalid = spec;
+  invalid.memory_limit = "512";
+  EXPECT_THROW(vektor::validate_workload_spec(invalid), std::invalid_argument);
 }
 
 TEST(Runtime, WorkloadProtoRoundTrips) {
   vektor::WorkloadSpec expected;
   expected.network = vektor::NetworkMode::None;
   expected.restart_policy = "on-failure";
+  expected.cpu_limit = "2";
+  expected.memory_limit = "1G";
   expected.environment["MODE"] = "test";
   expected.mounts.push_back({"/source", "/target", true});
   expected.devices.push_back({"/dev/input0", "/dev/input0"});

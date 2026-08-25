@@ -6,6 +6,17 @@ All notable changes to VEKTOR are documented here.
 
 ### Added
 
+- Independent activation and rollback routing for three named workloads per
+  agent, with unaffected workload runtimes preserved during rollback.
+- Strict CPU and memory workload limits carried through YAML, gRPC state,
+  fingerprints, and OCI runtime activation arguments.
+- Automatic registration of legacy single-workload state as the `default`
+  workload when a v1.2 registry is first opened.
+- Stable workload-ID validation and deterministic per-workload deployment-state
+  paths, retaining the legacy single-workload state path for `default`.
+- A versioned workload-state registry that persists managed workload identities
+  and gives each workload independent desired, observed, previous, and audit
+  state machines across agent reconstruction.
 - WSL systemd package-lifecycle qualification covering clean installation,
   restart persistence, upgrade, downgrade, and purge cleanup. Package purge
   now removes empty VEKTOR runtime and log directories while retaining
