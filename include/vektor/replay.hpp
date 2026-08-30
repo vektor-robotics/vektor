@@ -20,6 +20,7 @@ struct ReplayDefinition {
   std::string source_run_id;
   ReplayAdapter adapter{ReplayAdapter::Rosbag2};
   unsigned int ros_domain_id{232};
+  bool localhost_only{true};
   std::chrono::milliseconds timeout{std::chrono::minutes(10)};
   std::map<std::string, std::string> topic_remaps;
   std::filesystem::path qos_overrides;

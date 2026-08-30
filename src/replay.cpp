@@ -208,7 +208,7 @@ void signal_group(pid_t pid, int signal) {
 }
 
 ProcessResult run_process(const std::vector<std::string> &command,
-                          unsigned int ros_domain_id,
+                          unsigned int ros_domain_id, bool localhost_only,
                           std::chrono::milliseconds timeout,
                           const std::filesystem::path &log_path) {
   if (command.empty())
@@ -233,7 +233,9 @@ ProcessResult run_process(const std::vector<std::string> &command,
       close(null_input);
     const auto domain = std::to_string(ros_domain_id);
     if (setenv("ROS_DOMAIN_ID", domain.c_str(), 1) != 0 ||
-        setenv("ROS_LOCALHOST_ONLY", "1", 1) != 0 ||
+        setenv("ROS_AUTOMATIC_DISCOVERY_RANGE",
+               localhost_only ? "LOCALHOST" : "SUBNET", 1) != 0 ||
+        unsetenv("ROS_LOCALHOST_ONLY") != 0 ||
         setenv("RCUTILS_COLORIZED_OUTPUT", "0", 1) != 0)
       _exit(126);
     std::vector<std::string> mutable_command = command;
@@ -316,8 +318,8 @@ ReplayDefinition load_replay_definition(const std::filesystem::path &path) {
     throw std::invalid_argument("replay definition requires schema_version: 1");
   reject_unknown(node,
                  {"schema_version", "replay_id", "source_run_id", "adapter",
-                  "ros_domain_id", "timeout_seconds", "topic_remaps",
-                  "qos_overrides", "simulator"},
+                  "ros_domain_id", "discovery_scope", "timeout_seconds",
+                  "topic_remaps", "qos_overrides", "simulator"},
                  "replay definition");
   if (!node["ros_domain_id"] || !node["ros_domain_id"].IsScalar())
     throw std::invalid_argument("replay definition requires 'ros_domain_id'");
@@ -326,6 +328,13 @@ ReplayDefinition load_replay_definition(const std::filesystem::path &path) {
   definition.source_run_id = required_scalar(node, "source_run_id");
   definition.adapter = parse_adapter(required_scalar(node, "adapter"));
   definition.ros_domain_id = node["ros_domain_id"].as<unsigned int>();
+  if (node["discovery_scope"]) {
+    const auto scope = required_scalar(node, "discovery_scope");
+    if (scope != "localhost" && scope != "subnet")
+      throw std::invalid_argument(
+          "replay discovery_scope must be localhost or subnet");
+    definition.localhost_only = scope == "localhost";
+  }
   if (node["timeout_seconds"])
     definition.timeout =
         std::chrono::seconds(node["timeout_seconds"].as<unsigned int>());
@@ -380,8 +389,16 @@ ReplayExecutor::execute(const ReplayDefinition &definition,
 
   std::vector<std::string> command;
   if (definition.adapter == ReplayAdapter::Rosbag2) {
-    command = {ros2_executable_.string(),    "bag", "play", bag.uri, "--clock",
-               "--disable-keyboard-controls"};
+    command = {ros2_executable_.string(),
+               "bag",
+               "play",
+               "--clock",
+               "100",
+               "--disable-keyboard-controls",
+               "--delay",
+               "1",
+               "--wait-for-all-acked",
+               "2000"};
     if (!definition.qos_overrides.empty()) {
       command.push_back("--qos-profile-overrides-path");
       command.push_back(definition.qos_overrides.string());
@@ -391,6 +408,8 @@ ReplayExecutor::execute(const ReplayDefinition &definition,
       for (const auto &[source, target] : definition.topic_remaps)
         command.push_back(source + ":=" + target);
     }
+    command.push_back("--");
+    command.push_back(bag.uri);
   } else {
     command.push_back(definition.executable.string());
     for (const auto &argument : definition.arguments)
@@ -405,13 +424,15 @@ ReplayExecutor::execute(const ReplayDefinition &definition,
   manifest.source_bag = bag;
   manifest.adapter = definition.adapter;
   manifest.ros_domain_id = definition.ros_domain_id;
+  manifest.localhost_only = definition.localhost_only;
   manifest.timeout = definition.timeout;
   manifest.topic_remaps = definition.topic_remaps;
   manifest.command = command;
   manifest.started_at = utc_timestamp();
   manifest.log_path = std::filesystem::absolute(log_path).string();
-  const auto result = run_process(command, definition.ros_domain_id,
-                                  definition.timeout, log_path);
+  const auto result =
+      run_process(command, definition.ros_domain_id, definition.localhost_only,
+                  definition.timeout, log_path);
   manifest.stopped_at = utc_timestamp();
   manifest.exit_code = result.exit_code;
   manifest.status = result.timed_out        ? ReplayStatus::TimedOut

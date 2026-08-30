@@ -268,6 +268,15 @@ if(BUILD_TESTING)
       -DSTATE_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/capture-cli-state
       -P ${CMAKE_CURRENT_SOURCE_DIR}/test/test_capture_cli.cmake)
 
+  add_test(NAME test_validation_testbed
+    COMMAND ${CMAKE_COMMAND}
+      -DVEKTOR_EXECUTABLE=$<TARGET_FILE:vektor>
+      -DTESTBED_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/scripts/run-validation-testbed.sh
+      -DEVIDENCE_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/validation-testbed-evidence
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/test/test_validation_testbed.cmake)
+  set_tests_properties(test_validation_testbed PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120)
+
   add_test(NAME test_ubuntu_packaging
     COMMAND ${CMAKE_COMMAND} -P
       ${CMAKE_CURRENT_SOURCE_DIR}/test/verify_ubuntu_packaging.cmake)

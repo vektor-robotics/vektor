@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -65,6 +66,14 @@ TEST(Replay, ExecutesRosbag2AdapterAndPersistsProvenance) {
   EXPECT_EQ(manifest.command[0], "/bin/true");
   EXPECT_EQ(manifest.command[1], "bag");
   EXPECT_EQ(manifest.command[2], "play");
+  EXPECT_NE(
+      std::find(manifest.command.begin(), manifest.command.end(), "--delay"),
+      manifest.command.end());
+  EXPECT_NE(std::find(manifest.command.begin(), manifest.command.end(),
+                      "--wait-for-all-acked"),
+            manifest.command.end());
+  EXPECT_EQ(manifest.command[manifest.command.size() - 2], "--");
+  EXPECT_EQ(manifest.command.back(), source.artifacts.front().uri);
   EXPECT_NE(vektor::replay_manifest_to_json(manifest).find(
                 "\"status\":\"completed\""),
             std::string::npos);
@@ -140,6 +149,7 @@ TEST(Replay, LoadsVersionedDefinitionAndRejectsUnsafeDomain) {
               "source_run_id: source-run\n"
               "adapter: simulator\n"
               "ros_domain_id: 230\n"
+              "discovery_scope: subnet\n"
               "timeout_seconds: 30\n"
               "simulator:\n"
               "  executable: /bin/true\n"
@@ -148,6 +158,7 @@ TEST(Replay, LoadsVersionedDefinitionAndRejectsUnsafeDomain) {
   const auto definition = vektor::load_replay_definition(path);
   EXPECT_EQ(definition.adapter, vektor::ReplayAdapter::Simulator);
   EXPECT_EQ(definition.ros_domain_id, 230U);
+  EXPECT_FALSE(definition.localhost_only);
   EXPECT_EQ(definition.arguments.front(), "${source_run_id}");
 
   {

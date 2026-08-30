@@ -1,0 +1,9 @@
+schema_version: 1
+replay_id: validation-baseline-replay-001
+source_run_id: validation-baseline-001
+adapter: rosbag2
+ros_domain_id: 231
+discovery_scope: subnet
+timeout_seconds: 30
+topic_remaps:
+  /vektor_testbed/input: /vektor_testbed/replay

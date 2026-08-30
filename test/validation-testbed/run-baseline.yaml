@@ -1,0 +1,19 @@
+schema_version: 1
+run_id: validation-baseline-001
+name: Validation testbed baseline
+artifact: ghcr.io/vektor-robotics/testbed@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+workload_id: testbed-publisher
+policy: policy.yaml
+parameters:
+  publish_rate_hz: "10"
+environment:
+  site: reproducible-ros2-testbed
+  scenario: bounded-publisher
+topics: [/vektor_testbed/input]
+storage_id: sqlite3
+event_sources:
+  health_history: status.jsonl
+  deployment_audit: audit.jsonl
+  max_events: 32
+robot_id: testbed-robot-01
+operator: automated-testbed
