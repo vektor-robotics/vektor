@@ -129,6 +129,7 @@ fi
 python3 - "${evidence_directory}" "${replayed_count}" \
   "${repository_root}" <<'PY'
 import json
+import os
 import pathlib
 import platform
 import subprocess
@@ -137,6 +138,12 @@ import sys
 root = pathlib.Path(sys.argv[1])
 replayed = int(sys.argv[2])
 repository = pathlib.Path(sys.argv[3])
+git_environment = os.environ.copy()
+git_environment.update({
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "safe.directory",
+    "GIT_CONFIG_VALUE_0": str(repository),
+})
 comparison = json.loads((root / "outputs/comparison.json").read_text())
 replay = json.loads((root / "outputs/replay.json").read_text())
 experiment = json.loads((root / "outputs/experiment.json").read_text())
@@ -144,14 +151,19 @@ summary = {
     "schema_version": 1,
     "testbed": "bounded-ros2-publisher",
     "repository_commit": subprocess.check_output(
-        ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip(),
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        env=git_environment,
+        text=True,
+    ).strip(),
     "repository_dirty": (
         subprocess.run(
             ["git", "-C", str(repository), "diff", "--quiet", "--ignore-space-at-eol"],
             check=False,
+            env=git_environment,
         ).returncode != 0
         or bool(subprocess.check_output(
             ["git", "-C", str(repository), "ls-files", "--others", "--exclude-standard"],
+            env=git_environment,
             text=True,
         ).strip())
     ),
