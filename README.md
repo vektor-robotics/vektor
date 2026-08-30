@@ -92,17 +92,22 @@ vektor replay execute --config config/replay.example.yaml --format json
 
 Replay definitions use schema version 1 and identify a unique replay, its
 completed source run, an adapter, a required ROS domain ID from 1–232, a bounded
-timeout, optional topic remaps, and optional rosbag2 QoS overrides. The rosbag2
-adapter always publishes simulated time with `--clock`, disables keyboard
-controls, and executes without a shell.
+timeout, optional topic remaps, an optional discovery scope, and optional
+rosbag2 QoS overrides. Discovery defaults to `localhost`; `subnet` must be
+selected explicitly for trusted test networks whose middleware cannot exchange
+rosbag2 traffic under localhost-only discovery. The rosbag2
+adapter always publishes simulated time at 100 Hz with `--clock`, disables
+keyboard controls, allows one second for subscriber discovery, waits a bounded
+two seconds for reliable acknowledgements, and executes without a shell.
 
 The `simulator` adapter launches an operator-selected executable directly. Its
 bounded argument list may use `${bag_path}`, `${source_run_id}`, `${replay_id}`,
 `${ros_domain_id}`, and `${output_dir}` placeholders. See
 `config/replay.simulator.example.yaml`. VEKTOR sets `ROS_DOMAIN_ID` for the
-adapter process and forces `ROS_LOCALHOST_ONLY=1`, redirects its output to a
-private log, signals the entire adapter process group on timeout, and never
-issues actuator commands itself.
+adapter process, applies the declared ROS discovery scope, redirects its output
+to a private log, signals the entire adapter process group on timeout, and
+never issues actuator commands itself. Subnet discovery is not a security
+boundary; use a trusted isolated network or firewall it.
 
 Before launch, VEKTOR requires a completed source run with a rosbag2 artifact
 whose current SHA-256 fingerprint and byte count match the run manifest. Replay
@@ -133,6 +138,13 @@ records baseline and candidate artifacts, parameters, outcomes, every metric
 contribution, rejection reasons, scores, and ranks. Results are advisory only:
 the manifest records `automatic_deployment: false`, and this command has no
 deployment path. Manifests are stored under `.vektor/experiments` by default.
+
+Run the bounded ROS 2 capture-to-score qualification workflow with
+`scripts/run-validation-testbed.sh`. It retains definitions, run and replay
+manifests, bags, comparison and scoring output, and an explicit evidence-scope
+summary. See [the validation testbed guide](docs/validation-testbed.md). The
+testbed is simulated evidence and does not satisfy the separate physical
+correlation gate.
 
 ## Redacted support bundle
 

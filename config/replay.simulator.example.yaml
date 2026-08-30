@@ -3,6 +3,7 @@ replay_id: navigation-simulator-replay-001
 source_run_id: navigation-baseline-001
 adapter: simulator
 ros_domain_id: 232
+discovery_scope: localhost
 timeout_seconds: 1800
 topic_remaps:
   /cmd_vel: /vektor/replay/cmd_vel

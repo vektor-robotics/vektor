@@ -1,0 +1,20 @@
+schema_version: 1
+experiment_id: validation-candidates-001
+baseline_run_id: validation-baseline-001
+required_outcome: passed
+metrics:
+  - name: publish_rate_hz
+    objective: maximize
+    weight: 1.0
+    scale: 5.0
+    tolerance: 0.1
+  - name: elapsed_time_s
+    objective: minimize
+    weight: 0.5
+    scale: 1.0
+    tolerance: 0.05
+candidates:
+  - candidate_id: slow-publisher
+    run_id: validation-candidate-slow-001
+  - candidate_id: fast-publisher
+    run_id: validation-candidate-fast-001
