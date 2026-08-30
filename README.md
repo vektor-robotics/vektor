@@ -574,15 +574,14 @@ colcon test-result --verbose
 ## Roadmap
 
 Milestones 1–5 provide checks, status snapshots, the mutually authenticated
-machine agent, fleet aggregation, and health-gated OCI rollouts. VEKTOR has now
-completed v0.6 Reconcile: applying the desired artifact to the actual machine
-runtime, verifying the observed digest and health, detecting drift, and safely
-recovering or rolling back after failures. VEKTOR has also completed v0.7 Trust:
-artifact identity, policy enforcement, provenance, auditability, and real OCI
-negative integration coverage. VEKTOR has also completed v0.8 Control, v0.9
-Harden, and the v1.0 compatibility engineering milestone. The current product
-focus is v1.1 Operate: installable packages, service supervision, safe policy
-reload, operational metrics, and redacted diagnostics. Release qualification
+machine agent, fleet aggregation, and health-gated OCI rollouts. VEKTOR has
+completed v0.6 Reconcile, v0.7 Trust, v0.8 Control, v0.9 Harden, the v1.0
+compatibility engineering milestone, v1.1 Operate, and v1.2 Multi-workload. The
+current product focus is v1.3 Validate: capture exact deployment runs, compare
+their parameters and outcomes, replay them in configured offline environments,
+and score candidate configurations. Customer interviews and design-partner
+evaluation are milestone gates. Learned validation environments remain a
+conditional research track, not a current product claim. Release qualification
 evidence remains a separate gate before the `v1.0.0` tag. See `ROADMAP.md`.
 
 ## Contributing and security
