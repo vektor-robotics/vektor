@@ -1,10 +1,11 @@
 # VEKTOR roadmap
 
-VEKTOR is building a trustworthy software-delivery control plane for autonomous
-machines. The v1 engineering foundation is complete: health-aware delivery,
-runtime reconciliation, artifact trust, access control, fault hardening, and
-stable compatibility contracts. Post-v1 work prioritizes operability on real
-robots, multiple workloads per machine, and evidence-backed fleet scale.
+VEKTOR is building a trustworthy software-delivery and validation control plane
+for autonomous machines. The v1 engineering foundation is complete:
+health-aware delivery, runtime reconciliation, artifact trust, access control,
+fault hardening, and stable compatibility contracts. Post-v1 work prioritizes
+operability on real robots, multiple workloads per machine, and evidence-backed
+validation of real deployment runs before broader fleet-scale expansion.
 
 ## Released
 
@@ -164,7 +165,7 @@ These are release-owner activities, not blockers for post-v1 development. A
 failed gate remains visible and must not be converted into a checked item by
 rerunning past the first failure.
 
-## Current focus
+## Completed post-v1 milestones
 
 ### v1.1 — Operate
 
@@ -196,8 +197,6 @@ machine, start VEKTOR as a least-privilege service, validate and safely reload
 policy, observe its health, collect a redacted diagnostic bundle, and complete
 an upgrade and rollback without losing deployment or audit state.
 
-## Next
-
 ### v1.2 — Multi-workload
 
 Remove the one-managed-container-per-agent limit while preserving independent
@@ -219,7 +218,59 @@ Definition of done: a fleet can independently roll out and roll back three
 named workloads per robot while preserving v1 single-workload behavior and
 keeping unaffected workloads available.
 
-### v1.3 — Observe and scale
+## Current focus
+
+### v1.3 — Validate
+
+Bind each physical or simulated robot run to the exact deployed artifact,
+workload, parameters, environment, telemetry, and outcome, then make runs
+reproducible and comparable. This milestone tests whether VEKTOR can reduce
+physical validation iterations before any learned world-model work begins.
+
+Customer evidence runs in parallel with implementation:
+
+- [ ] Interview 5–10 deployment, integration, or commissioning engineers about
+  their most recent physical-validation loop and current workaround
+- [ ] Confirm the same repeated deploy, run, inspect, change, and retest loop
+  with at least three additional teams
+- [ ] Obtain two sanitized run structures or commitments to evaluate a
+  capture/compare prototype
+- [ ] Establish one design-partner relationship with a defined evaluation step
+
+Engineering scope:
+
+- [ ] Define a versioned run manifest linking the exact OCI digest, workload,
+  VEKTOR policy, ROS parameters, environment metadata, operator, and timestamps
+- [ ] Add `vektor capture start`, `stop`, `show`, and `export` around a bounded,
+  configurable ROS 2 telemetry and rosbag2 integration
+- [ ] Persist run outcomes, health transitions, deployment events, and
+  user-supplied annotations without embedding unbounded sensor data in agent
+  state
+- [ ] Add `vektor compare` with stable machine-readable metric, parameter,
+  event, and outcome differences between two runs
+- [ ] Add replay adapters that launch a captured run against an
+  operator-selected simulator or rosbag2 playback environment
+- [ ] Add evaluation policies and an experiment manifest for scoring and ranking
+  candidate configurations without automatically deploying a winner
+- [ ] Prove the vertical slice on a reproducible ROS 2 testbed and retain the
+  capture, comparison, replay, score, and real-world correlation evidence
+- [ ] Have at least one external design partner review the workflow or prototype
+  before declaring the milestone complete
+
+Definition of done: an operator can deploy an exact workload, capture a named
+validation run, compare it with another run, replay it in a configured offline
+environment, and rank a small set of parameter candidates using explicit
+metrics. The retained evidence identifies where offline ranking agrees or
+disagrees with physical results, and at least one external team has evaluated
+the workflow.
+
+Non-goals for v1.3: generated future sensor streams, automatic parameter
+optimization, learned environment models, and claims that physical testing has
+been replaced.
+
+## Next
+
+### v1.4 — Observe and scale
 
 Reduce control-plane cost and make large-fleet behavior explainable before
 increasing default scale targets.
@@ -243,7 +294,7 @@ manually from every robot.
 
 ## Later
 
-### v1.4 — Runtime and inventory ecosystem
+### v1.5 — Runtime and inventory ecosystem
 
 - Package and qualify additional runtime-driver implementations without
   weakening the v1 extension contract
@@ -252,6 +303,31 @@ manually from every robot.
   post-deployment checks
 - Publish reference integrations and conformance tests for third-party drivers
   and inventory providers
+
+### Experimental — Learned validation environments
+
+Evaluate this research track only after v1.3 demonstrates customer value and
+shows that deterministic replay or conventional simulation cannot reproduce an
+important class of deployment failures.
+
+Entry gates:
+
+- Multiple design partners identify counterfactual sensor or environment
+  response as the blocker after using capture, compare, replay, and evaluation
+- Sufficient governed real-run data exists for a bounded task and environment
+- A classical simulator or replay baseline and an objective physical-test
+  benchmark exist before training begins
+
+Candidate progression:
+
+1. Reconstruct bounded site conditions from a small set of real runs.
+2. Generate simulator-like sensor feedback for candidate robot actions.
+3. Learn only the residual effects that the classical baseline misses.
+4. Rank candidate configurations offline and physically test the leading set.
+5. Measure whether the workflow reduces commissioning runs or elapsed time.
+
+This track has no committed version number. A learned world model is a possible
+mechanism, not the VEKTOR product claim or the starting milestone.
 
 ### v2.0 — Persistent control plane
 
@@ -269,6 +345,9 @@ when the control plane is unavailable.
   reproducible evidence.
 - New centralized components must not remove local agent autonomy or require
   internet connectivity for safe operation.
+- Product milestones require external workflow evidence in addition to passing
+  engineering tests; polite interest and connection acceptance are not
+  validation.
 - A milestone may change when design-partner use reveals a higher-risk gap, but
   its compatibility and migration impact must be documented before
   implementation.
