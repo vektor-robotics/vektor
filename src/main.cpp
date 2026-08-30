@@ -1,11 +1,14 @@
 #include "vektor/agent.hpp"
 #include "vektor/approval.hpp"
 #include "vektor/authorization.hpp"
+#include "vektor/capture.hpp"
+#include "vektor/comparison.hpp"
 #include "vektor/config.hpp"
 #include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
 #include "vektor/reporter.hpp"
 #include "vektor/rollout.hpp"
+#include "vektor/run.hpp"
 #include "vektor/status.hpp"
 #include "vektor/support_bundle.hpp"
 #include "vektor/trust.hpp"
@@ -14,9 +17,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <optional>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -25,6 +31,7 @@
 namespace {
 struct CliOptions {
   std::string command;
+  std::string capture_action;
   std::string config_path;
   std::string format{"text"};
   std::string validation_type;
@@ -54,43 +61,63 @@ struct CliOptions {
   std::string runtime_container{"vektor-workload"};
   std::optional<std::filesystem::path> trust_policy;
   std::optional<std::filesystem::path> authorization_policy;
+  std::filesystem::path run_state_directory{".vektor/runs"};
+  std::string run_id;
+  std::string baseline_run_id;
+  std::string candidate_run_id;
+  std::string outcome;
+  std::vector<std::string> annotations;
+  std::map<std::string, double> run_metrics;
 };
 
 [[noreturn]] void usage_error(const std::string &message = {}) {
   if (!message.empty())
     std::cerr << "vektor: " << message << "\n\n";
-  std::cerr << "Usage:\n"
-            << "  vektor check  --config <path> [--format text|json]\n"
-            << "  vektor validate --type health|fleet|rollout|authorization|"
-               "approval-policy|approvals|trust\n"
-            << "                  --config <path> [--format text|json]\n"
-            << "  vektor status --config <path> [--format text|json] "
-               "[--robot-id <id>]\n"
-            << "                [--watch] [--interval-ms <ms>] "
-               "[--history <path>|--no-history]\n"
-            << "  vektor agent  --config <path> [--robot-id <id>] "
-               "[--interval-ms <ms>]\n"
-            << "                [--listen <host:port>] "
-               "[--history <path>|--no-history]\n"
-            << "                (--tls-cert <path> --tls-key <path> "
-               "--tls-ca <path>|--insecure)\n"
-            << "                [--oci-runtime docker|podman] "
-               "[--runtime-container <name>] "
-               "[--deployment-state <path>] "
-               "[--audit-log <path>] "
-               "[--trust-policy <path>] "
-               "[--authorization-policy <path>]\n"
-            << "                [--fleet-id <id> --workload-id <id>]\n"
-            << "  vektor fleet  --config <path> [--format text|json] "
-               "[--selector key=value]...\n"
-            << "                [--limit <count>] [--watch] "
-               "[--interval-ms <ms>]\n"
-            << "  vektor deploy|promote|rollback --config <rollout.yaml> "
-               "[--format text|json]\n"
-            << "  vektor approval-payload --config <rollout.yaml> "
-               "--wave <name> --identity <id>\n"
-            << "                --issued-at <UTC> --expires-at <UTC>\n"
-            << "  vektor support-bundle --config <path> --output <new-directory>\n";
+  std::cerr
+      << "Usage:\n"
+      << "  vektor check  --config <path> [--format text|json]\n"
+      << "  vektor validate --type health|fleet|rollout|authorization|"
+         "approval-policy|approvals|trust\n"
+      << "                  --config <path> [--format text|json]\n"
+      << "  vektor status --config <path> [--format text|json] "
+         "[--robot-id <id>]\n"
+      << "                [--watch] [--interval-ms <ms>] "
+         "[--history <path>|--no-history]\n"
+      << "  vektor agent  --config <path> [--robot-id <id>] "
+         "[--interval-ms <ms>]\n"
+      << "                [--listen <host:port>] "
+         "[--history <path>|--no-history]\n"
+      << "                (--tls-cert <path> --tls-key <path> "
+         "--tls-ca <path>|--insecure)\n"
+      << "                [--oci-runtime docker|podman] "
+         "[--runtime-container <name>] "
+         "[--deployment-state <path>] "
+         "[--audit-log <path>] "
+         "[--trust-policy <path>] "
+         "[--authorization-policy <path>]\n"
+      << "                [--fleet-id <id> --workload-id <id>]\n"
+      << "  vektor fleet  --config <path> [--format text|json] "
+         "[--selector key=value]...\n"
+      << "                [--limit <count>] [--watch] "
+         "[--interval-ms <ms>]\n"
+      << "  vektor deploy|promote|rollback --config <rollout.yaml> "
+         "[--format text|json]\n"
+      << "  vektor capture start --config <run.yaml> "
+         "[--state-dir <path>] [--format text|json]\n"
+      << "  vektor capture stop --run-id <id> [--outcome <value>] "
+         "[--annotation <text>]... [--metric <name=value>]...\n"
+      << "                      [--state-dir <path>] "
+         "[--format text|json]\n"
+      << "  vektor capture show --run-id <id> [--state-dir <path>] "
+         "[--format text|json]\n"
+      << "  vektor capture export --run-id <id> --output <new-directory> "
+         "[--state-dir <path>]\n"
+      << "  vektor compare --baseline <run-id> --candidate <run-id> "
+         "[--state-dir <path>] [--format text|json]\n"
+      << "  vektor approval-payload --config <rollout.yaml> "
+         "--wave <name> --identity <id>\n"
+      << "                --issued-at <UTC> --expires-at <UTC>\n"
+      << "  vektor support-bundle --config <path> --output <new-directory>\n";
   throw std::invalid_argument("invalid command line");
 }
 
@@ -108,13 +135,25 @@ CliOptions parse_cli(int argc, char **argv) {
   options.command = argv[1];
   if (options.command != "check" && options.command != "status" &&
       options.command != "agent" && options.command != "fleet" &&
-      options.command != "validate" &&
-      options.command != "support-bundle" &&
+      options.command != "validate" && options.command != "support-bundle" &&
       options.command != "deploy" && options.command != "promote" &&
-      options.command != "rollback" && options.command != "approval-payload")
-    usage_error("unknown command '" + options.command + "'");
+      options.command != "rollback" && options.command != "approval-payload" &&
+      options.command != "compare")
+    if (options.command != "capture")
+      usage_error("unknown command '" + options.command + "'");
 
-  for (int index = 2; index < argc; ++index) {
+  int first_option = 2;
+  if (options.command == "capture") {
+    if (argc < 3)
+      usage_error("capture requires start, stop, or show");
+    options.capture_action = argv[2];
+    if (options.capture_action != "start" && options.capture_action != "stop" &&
+        options.capture_action != "show" && options.capture_action != "export")
+      usage_error("capture requires start, stop, show, or export");
+    first_option = 3;
+  }
+
+  for (int index = first_option; index < argc; ++index) {
     const std::string argument(argv[index]);
     if (argument == "--config")
       options.config_path = next_value(index, argc, argv, argument);
@@ -181,6 +220,42 @@ CliOptions parse_cli(int argc, char **argv) {
       options.trust_policy = next_value(index, argc, argv, argument);
     else if (argument == "--authorization-policy")
       options.authorization_policy = next_value(index, argc, argv, argument);
+    else if (argument == "--state-dir")
+      options.run_state_directory = next_value(index, argc, argv, argument);
+    else if (argument == "--run-id")
+      options.run_id = next_value(index, argc, argv, argument);
+    else if (argument == "--baseline")
+      options.baseline_run_id = next_value(index, argc, argv, argument);
+    else if (argument == "--candidate")
+      options.candidate_run_id = next_value(index, argc, argv, argument);
+    else if (argument == "--outcome")
+      options.outcome = next_value(index, argc, argv, argument);
+    else if (argument == "--annotation")
+      options.annotations.push_back(next_value(index, argc, argv, argument));
+    else if (argument == "--metric") {
+      const auto value = next_value(index, argc, argv, argument);
+      const auto separator = value.find('=');
+      if (separator == std::string::npos || separator == 0 ||
+          separator + 1 == value.size())
+        usage_error("--metric must use name=value");
+      const auto name = value.substr(0, separator);
+      static const std::regex metric_name_pattern(
+          "^[A-Za-z][A-Za-z0-9_.-]{0,127}$");
+      if (!std::regex_match(name, metric_name_pattern))
+        usage_error("invalid metric name '" + name + "'");
+      double parsed = 0.0;
+      try {
+        std::size_t consumed = 0;
+        parsed = std::stod(value.substr(separator + 1), &consumed);
+        if (consumed != value.size() - separator - 1 ||
+            !std::isfinite(parsed))
+          throw std::invalid_argument("invalid numeric metric");
+      } catch (const std::exception &) {
+        usage_error("invalid numeric value for metric '" + name + "'");
+      }
+      if (!options.run_metrics.emplace(name, parsed).second)
+        usage_error("duplicate metric '" + name + "'");
+    }
     else if (argument == "--selector")
       options.selectors.push_back(next_value(index, argc, argv, argument));
     else if (argument == "--limit") {
@@ -202,29 +277,114 @@ CliOptions parse_cli(int argc, char **argv) {
       usage_error("unknown option '" + argument + "'");
   }
 
-  if (options.config_path.empty())
-    usage_error("--config is required");
   if (options.format != "text" && options.format != "json")
     usage_error("--format must be text or json");
+  if (options.run_metrics.size() > 256)
+    usage_error("a run may contain at most 256 metrics");
+  const bool capture_command = options.command == "capture";
+  const bool compare_command = options.command == "compare";
+  const bool has_run_options =
+      options.run_state_directory != ".vektor/runs" ||
+      !options.run_id.empty() || !options.outcome.empty() ||
+      !options.annotations.empty() || !options.run_metrics.empty() ||
+      !options.baseline_run_id.empty() || !options.candidate_run_id.empty();
+  if (!capture_command && !compare_command && has_run_options)
+    usage_error("run option used with another command");
+  if (capture_command) {
+    if (!options.baseline_run_id.empty() || !options.candidate_run_id.empty())
+      usage_error("comparison option used with capture");
+    if (options.capture_action == "start") {
+      if (options.config_path.empty())
+        usage_error("capture start requires --config");
+      if (!options.run_id.empty() || !options.outcome.empty() ||
+          !options.annotations.empty() || !options.run_metrics.empty() ||
+          !options.output_directory.empty())
+        usage_error("capture start reads run fields from --config");
+    } else {
+      if (!options.config_path.empty())
+        usage_error("--config is supported only by capture start");
+      if (options.run_id.empty())
+        usage_error("capture stop and show require --run-id");
+      if ((options.capture_action == "show" ||
+           options.capture_action == "export") &&
+          (!options.outcome.empty() || !options.annotations.empty() ||
+           !options.run_metrics.empty()))
+        usage_error(
+            "outcome, annotations, and metrics are supported only by capture stop");
+      if (options.capture_action == "export" &&
+          options.output_directory.empty())
+        usage_error("capture export requires --output");
+      if (options.capture_action != "export" &&
+          !options.output_directory.empty())
+        usage_error("--output is supported only by capture export");
+    }
+    if (options.watch || !options.robot_id.empty() ||
+        !options.fleet_id.empty() || !options.workload_id.empty() ||
+        options.history_path || !options.history || options.insecure ||
+        options.tls_certificate || options.tls_private_key ||
+        options.tls_client_ca || !options.selectors.empty() || options.limit ||
+        options.deployment_state != ".vektor/deployment.yaml" ||
+        options.audit_log != ".vektor/audit.jsonl" ||
+        options.metrics != ".vektor/metrics.prom" ||
+        options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" ||
+        options.trust_policy || options.authorization_policy ||
+        options.interval != std::chrono::milliseconds(5000) ||
+        options.listen_address != "127.0.0.1:50051" ||
+        !options.validation_type.empty() || !options.wave.empty() ||
+        !options.approval_identity.empty() || !options.issued_at.empty() ||
+        !options.expires_at.empty())
+      usage_error("option is not supported by capture");
+    return options;
+  }
+  if (compare_command) {
+    if (options.baseline_run_id.empty() || options.candidate_run_id.empty())
+      usage_error("compare requires --baseline and --candidate");
+    if (!options.config_path.empty() || !options.run_id.empty() ||
+        !options.outcome.empty() || !options.annotations.empty() ||
+        !options.run_metrics.empty() || !options.output_directory.empty() ||
+        options.watch || !options.robot_id.empty() || !options.fleet_id.empty() ||
+        !options.workload_id.empty() || options.history_path || !options.history ||
+        options.insecure || options.tls_certificate || options.tls_private_key ||
+        options.tls_client_ca || !options.selectors.empty() || options.limit ||
+        options.deployment_state != ".vektor/deployment.yaml" ||
+        options.audit_log != ".vektor/audit.jsonl" ||
+        options.metrics != ".vektor/metrics.prom" ||
+        options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" || options.trust_policy ||
+        options.authorization_policy ||
+        options.interval != std::chrono::milliseconds(5000) ||
+        options.listen_address != "127.0.0.1:50051" ||
+        !options.validation_type.empty() || !options.wave.empty() ||
+        !options.approval_identity.empty() || !options.issued_at.empty() ||
+        !options.expires_at.empty())
+      usage_error("option is not supported by compare");
+    return options;
+  }
+  if (options.config_path.empty())
+    usage_error("--config is required");
   const bool validation_command = options.command == "validate";
   if (!validation_command && !options.validation_type.empty())
     usage_error("--type is supported only by validate");
   if (validation_command) {
     static const std::vector<std::string> validation_types{
-        "health", "fleet", "rollout", "authorization", "approval-policy",
-        "approvals", "trust"};
+        "health",          "fleet",     "rollout", "authorization",
+        "approval-policy", "approvals", "trust"};
     if (std::find(validation_types.begin(), validation_types.end(),
                   options.validation_type) == validation_types.end())
       usage_error("validate requires a supported --type");
-    if (options.watch || !options.robot_id.empty() || !options.fleet_id.empty() ||
-        !options.workload_id.empty() || options.history_path || !options.history ||
-        options.insecure || options.tls_certificate || options.tls_private_key ||
+    if (options.watch || !options.robot_id.empty() ||
+        !options.fleet_id.empty() || !options.workload_id.empty() ||
+        options.history_path || !options.history || options.insecure ||
+        options.tls_certificate || options.tls_private_key ||
         options.tls_client_ca || options.listen_address != "127.0.0.1:50051" ||
         !options.selectors.empty() || options.limit ||
         options.deployment_state != ".vektor/deployment.yaml" ||
-        options.audit_log != ".vektor/audit.jsonl" || options.oci_runtime != "docker" ||
-        options.runtime_container != "vektor-workload" || options.trust_policy ||
-        options.authorization_policy || options.interval != std::chrono::milliseconds(5000))
+        options.audit_log != ".vektor/audit.jsonl" ||
+        options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" ||
+        options.trust_policy || options.authorization_policy ||
+        options.interval != std::chrono::milliseconds(5000))
       usage_error("option is not supported by validate");
   }
   const bool approval_payload_command = options.command == "approval-payload";
@@ -344,8 +504,8 @@ int run_validate(const CliOptions &options) {
     std::cout << "{\"schema_version\":1,\"valid\":true,\"type\":\""
               << options.validation_type << "\"}\n";
   else
-    std::cout << "VEKTOR VALIDATION PASSED\ntype: "
-              << options.validation_type << '\n';
+    std::cout << "VEKTOR VALIDATION PASSED\ntype: " << options.validation_type
+              << '\n';
   return 0;
 }
 
@@ -474,7 +634,84 @@ int run_approval_payload(const CliOptions &options,
   std::cout << vektor::approval_signing_payload(record);
   return 0;
 }
-int run_support_bundle(const CliOptions &options) { vektor::create_support_bundle(options.output_directory, options.config_path, options.history_path.value_or(vektor::default_status_history_path()), options.metrics); std::cout << "VEKTOR SUPPORT BUNDLE: " << options.output_directory << '\n'; return 0; }
+
+int run_capture(const CliOptions &options) {
+  const vektor::RunStore store(options.run_state_directory);
+  if (options.capture_action == "export") {
+    store.export_run(options.run_id, options.output_directory);
+    if (options.format == "json")
+      std::cout << vektor::run_manifest_to_json(store.get(options.run_id))
+                << '\n';
+    else
+      std::cout << "VEKTOR RUN EXPORT: " << options.output_directory << '\n';
+    return 0;
+  }
+  vektor::RunManifest manifest;
+  if (options.capture_action == "start") {
+    manifest = store.start(vektor::load_run_definition(options.config_path));
+    const auto artifact_root = options.run_state_directory.parent_path() /
+                               "artifacts" / manifest.run_id;
+    const auto bag_path = artifact_root / "rosbag2";
+    const auto log_path = artifact_root / "recorder.log";
+    const vektor::RosbagRecorder recorder;
+    try {
+      const auto pid = recorder.start(bag_path, manifest.topics,
+                                      manifest.storage_id, log_path);
+      try {
+        manifest = store.attach_recorder(manifest.run_id, pid, bag_path);
+      } catch (...) {
+        recorder.stop(pid, bag_path);
+        throw;
+      }
+    } catch (const std::exception &error) {
+      static_cast<void>(store.complete_capture(
+          manifest.run_id, "capture_failed",
+          {std::string("recorder launch failed: ") + error.what()}));
+      throw;
+    }
+  } else if (options.capture_action == "stop") {
+    manifest = store.get(options.run_id);
+    if (manifest.recorder_pid != 0) {
+      const vektor::RosbagRecorder recorder;
+      recorder.stop(manifest.recorder_pid, manifest.bag_path);
+    }
+    std::optional<vektor::RunArtifact> artifact;
+    if (!manifest.bag_path.empty() &&
+        std::filesystem::exists(manifest.bag_path))
+      artifact = vektor::fingerprint_run_artifact(manifest.bag_path, "rosbag2");
+    manifest = store.complete_capture(options.run_id, options.outcome,
+                                      options.annotations, artifact,
+                                      options.run_metrics);
+  } else {
+    manifest = store.get(options.run_id);
+  }
+  if (options.format == "json")
+    std::cout << vektor::run_manifest_to_json(manifest) << '\n';
+  else
+    vektor::print_run_manifest(manifest, std::cout);
+  return 0;
+}
+
+int run_compare(const CliOptions &options) {
+  const vektor::RunStore store(options.run_state_directory);
+  const auto comparison =
+      vektor::compare_runs(store.get(options.baseline_run_id),
+                           store.get(options.candidate_run_id));
+  if (options.format == "json")
+    std::cout << vektor::run_comparison_to_json(comparison) << '\n';
+  else
+    vektor::print_run_comparison(comparison, std::cout);
+  return 0;
+}
+
+int run_support_bundle(const CliOptions &options) {
+  vektor::create_support_bundle(
+      options.output_directory, options.config_path,
+      options.history_path.value_or(vektor::default_status_history_path()),
+      options.metrics);
+  std::cout << "VEKTOR SUPPORT BUNDLE: " << options.output_directory << '\n';
+  return 0;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -482,7 +719,11 @@ int main(int argc, char **argv) {
   try {
     const auto options = parse_cli(argc, argv);
     int exit_code = 0;
-    if (options.command == "validate") {
+    if (options.command == "capture") {
+      exit_code = run_capture(options);
+    } else if (options.command == "compare") {
+      exit_code = run_compare(options);
+    } else if (options.command == "validate") {
       exit_code = run_validate(options);
     } else if (options.command == "support-bundle") {
       exit_code = run_support_bundle(options);
