@@ -6,6 +6,7 @@
 #include "vektor/config.hpp"
 #include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
+#include "vektor/replay.hpp"
 #include "vektor/reporter.hpp"
 #include "vektor/rollout.hpp"
 #include "vektor/run.hpp"
@@ -32,6 +33,7 @@ namespace {
 struct CliOptions {
   std::string command;
   std::string capture_action;
+  std::string replay_action;
   std::string config_path;
   std::string format{"text"};
   std::string validation_type;
@@ -62,6 +64,7 @@ struct CliOptions {
   std::optional<std::filesystem::path> trust_policy;
   std::optional<std::filesystem::path> authorization_policy;
   std::filesystem::path run_state_directory{".vektor/runs"};
+  std::filesystem::path replay_directory{".vektor/replays"};
   std::string run_id;
   std::string baseline_run_id;
   std::string candidate_run_id;
@@ -114,6 +117,9 @@ struct CliOptions {
          "[--state-dir <path>]\n"
       << "  vektor compare --baseline <run-id> --candidate <run-id> "
          "[--state-dir <path>] [--format text|json]\n"
+      << "  vektor replay execute --config <replay.yaml> "
+         "[--state-dir <path>] [--replay-dir <path>] "
+         "[--format text|json]\n"
       << "  vektor approval-payload --config <rollout.yaml> "
          "--wave <name> --identity <id>\n"
       << "                --issued-at <UTC> --expires-at <UTC>\n"
@@ -138,7 +144,7 @@ CliOptions parse_cli(int argc, char **argv) {
       options.command != "validate" && options.command != "support-bundle" &&
       options.command != "deploy" && options.command != "promote" &&
       options.command != "rollback" && options.command != "approval-payload" &&
-      options.command != "compare")
+      options.command != "compare" && options.command != "replay")
     if (options.command != "capture")
       usage_error("unknown command '" + options.command + "'");
 
@@ -150,6 +156,13 @@ CliOptions parse_cli(int argc, char **argv) {
     if (options.capture_action != "start" && options.capture_action != "stop" &&
         options.capture_action != "show" && options.capture_action != "export")
       usage_error("capture requires start, stop, show, or export");
+    first_option = 3;
+  } else if (options.command == "replay") {
+    if (argc < 3)
+      usage_error("replay requires execute");
+    options.replay_action = argv[2];
+    if (options.replay_action != "execute")
+      usage_error("replay requires execute");
     first_option = 3;
   }
 
@@ -222,6 +235,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.authorization_policy = next_value(index, argc, argv, argument);
     else if (argument == "--state-dir")
       options.run_state_directory = next_value(index, argc, argv, argument);
+    else if (argument == "--replay-dir")
+      options.replay_directory = next_value(index, argc, argv, argument);
     else if (argument == "--run-id")
       options.run_id = next_value(index, argc, argv, argument);
     else if (argument == "--baseline")
@@ -247,16 +262,14 @@ CliOptions parse_cli(int argc, char **argv) {
       try {
         std::size_t consumed = 0;
         parsed = std::stod(value.substr(separator + 1), &consumed);
-        if (consumed != value.size() - separator - 1 ||
-            !std::isfinite(parsed))
+        if (consumed != value.size() - separator - 1 || !std::isfinite(parsed))
           throw std::invalid_argument("invalid numeric metric");
       } catch (const std::exception &) {
         usage_error("invalid numeric value for metric '" + name + "'");
       }
       if (!options.run_metrics.emplace(name, parsed).second)
         usage_error("duplicate metric '" + name + "'");
-    }
-    else if (argument == "--selector")
+    } else if (argument == "--selector")
       options.selectors.push_back(next_value(index, argc, argv, argument));
     else if (argument == "--limit") {
       const auto value = next_value(index, argc, argv, argument);
@@ -283,12 +296,15 @@ CliOptions parse_cli(int argc, char **argv) {
     usage_error("a run may contain at most 256 metrics");
   const bool capture_command = options.command == "capture";
   const bool compare_command = options.command == "compare";
+  const bool replay_command = options.command == "replay";
   const bool has_run_options =
       options.run_state_directory != ".vektor/runs" ||
+      options.replay_directory != ".vektor/replays" ||
       !options.run_id.empty() || !options.outcome.empty() ||
       !options.annotations.empty() || !options.run_metrics.empty() ||
       !options.baseline_run_id.empty() || !options.candidate_run_id.empty();
-  if (!capture_command && !compare_command && has_run_options)
+  if (!capture_command && !compare_command && !replay_command &&
+      has_run_options)
     usage_error("run option used with another command");
   if (capture_command) {
     if (!options.baseline_run_id.empty() || !options.candidate_run_id.empty())
@@ -309,8 +325,8 @@ CliOptions parse_cli(int argc, char **argv) {
            options.capture_action == "export") &&
           (!options.outcome.empty() || !options.annotations.empty() ||
            !options.run_metrics.empty()))
-        usage_error(
-            "outcome, annotations, and metrics are supported only by capture stop");
+        usage_error("outcome, annotations, and metrics are supported only by "
+                    "capture stop");
       if (options.capture_action == "export" &&
           options.output_directory.empty())
         usage_error("capture export requires --output");
@@ -343,22 +359,49 @@ CliOptions parse_cli(int argc, char **argv) {
     if (!options.config_path.empty() || !options.run_id.empty() ||
         !options.outcome.empty() || !options.annotations.empty() ||
         !options.run_metrics.empty() || !options.output_directory.empty() ||
-        options.watch || !options.robot_id.empty() || !options.fleet_id.empty() ||
-        !options.workload_id.empty() || options.history_path || !options.history ||
-        options.insecure || options.tls_certificate || options.tls_private_key ||
+        options.watch || !options.robot_id.empty() ||
+        !options.fleet_id.empty() || !options.workload_id.empty() ||
+        options.history_path || !options.history || options.insecure ||
+        options.tls_certificate || options.tls_private_key ||
         options.tls_client_ca || !options.selectors.empty() || options.limit ||
         options.deployment_state != ".vektor/deployment.yaml" ||
         options.audit_log != ".vektor/audit.jsonl" ||
         options.metrics != ".vektor/metrics.prom" ||
         options.oci_runtime != "docker" ||
-        options.runtime_container != "vektor-workload" || options.trust_policy ||
-        options.authorization_policy ||
+        options.runtime_container != "vektor-workload" ||
+        options.trust_policy || options.authorization_policy ||
         options.interval != std::chrono::milliseconds(5000) ||
         options.listen_address != "127.0.0.1:50051" ||
         !options.validation_type.empty() || !options.wave.empty() ||
         !options.approval_identity.empty() || !options.issued_at.empty() ||
         !options.expires_at.empty())
       usage_error("option is not supported by compare");
+    return options;
+  }
+  if (replay_command) {
+    if (options.config_path.empty())
+      usage_error("replay execute requires --config");
+    if (!options.run_id.empty() || !options.baseline_run_id.empty() ||
+        !options.candidate_run_id.empty() || !options.outcome.empty() ||
+        !options.annotations.empty() || !options.run_metrics.empty() ||
+        !options.output_directory.empty() || options.watch ||
+        !options.robot_id.empty() || !options.fleet_id.empty() ||
+        !options.workload_id.empty() || options.history_path ||
+        !options.history || options.insecure || options.tls_certificate ||
+        options.tls_private_key || options.tls_client_ca ||
+        !options.selectors.empty() || options.limit ||
+        options.deployment_state != ".vektor/deployment.yaml" ||
+        options.audit_log != ".vektor/audit.jsonl" ||
+        options.metrics != ".vektor/metrics.prom" ||
+        options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" ||
+        options.trust_policy || options.authorization_policy ||
+        options.interval != std::chrono::milliseconds(5000) ||
+        options.listen_address != "127.0.0.1:50051" ||
+        !options.validation_type.empty() || !options.wave.empty() ||
+        !options.approval_identity.empty() || !options.issued_at.empty() ||
+        !options.expires_at.empty())
+      usage_error("option is not supported by replay");
     return options;
   }
   if (options.config_path.empty())
@@ -694,14 +737,27 @@ int run_capture(const CliOptions &options) {
 
 int run_compare(const CliOptions &options) {
   const vektor::RunStore store(options.run_state_directory);
-  const auto comparison =
-      vektor::compare_runs(store.get(options.baseline_run_id),
-                           store.get(options.candidate_run_id));
+  const auto comparison = vektor::compare_runs(
+      store.get(options.baseline_run_id), store.get(options.candidate_run_id));
   if (options.format == "json")
     std::cout << vektor::run_comparison_to_json(comparison) << '\n';
   else
     vektor::print_run_comparison(comparison, std::cout);
   return 0;
+}
+
+int run_replay(const CliOptions &options) {
+  const auto definition = vektor::load_replay_definition(options.config_path);
+  const vektor::RunStore store(options.run_state_directory);
+  const vektor::ReplayExecutor executor;
+  const auto manifest =
+      executor.execute(definition, store.get(definition.source_run_id),
+                       options.replay_directory);
+  if (options.format == "json")
+    std::cout << vektor::replay_manifest_to_json(manifest) << '\n';
+  else
+    vektor::print_replay_manifest(manifest, std::cout);
+  return manifest.status == vektor::ReplayStatus::Completed ? 0 : 1;
 }
 
 int run_support_bundle(const CliOptions &options) {
@@ -723,6 +779,8 @@ int main(int argc, char **argv) {
       exit_code = run_capture(options);
     } else if (options.command == "compare") {
       exit_code = run_compare(options);
+    } else if (options.command == "replay") {
+      exit_code = run_replay(options);
     } else if (options.command == "validate") {
       exit_code = run_validate(options);
     } else if (options.command == "support-bundle") {

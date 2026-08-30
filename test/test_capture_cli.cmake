@@ -1,4 +1,5 @@
 if(NOT DEFINED VEKTOR_EXECUTABLE OR NOT DEFINED RUN_CONFIG OR
+   NOT DEFINED REPLAY_CONFIG OR
    NOT DEFINED STATE_DIRECTORY)
   message(FATAL_ERROR "capture CLI test arguments are required")
 endif()
@@ -6,8 +7,9 @@ endif()
 get_filename_component(state_parent "${STATE_DIRECTORY}" DIRECTORY)
 set(artifact_directory "${state_parent}/artifacts/navigation-baseline-001")
 set(export_directory "${state_parent}/capture-cli-export")
+set(replay_directory "${state_parent}/capture-cli-replays")
 file(REMOVE_RECURSE "${STATE_DIRECTORY}" "${artifact_directory}"
-     "${export_directory}")
+     "${export_directory}" "${replay_directory}")
 
 execute_process(
   COMMAND "${VEKTOR_EXECUTABLE}" capture start --config "${RUN_CONFIG}"
@@ -47,6 +49,19 @@ if(NOT stop_result EQUAL 0 OR
    NOT stop_output MATCHES "\"goal_error_m\":0.25" OR
    NOT stop_output MATCHES "\"kind\":\"rosbag2\"")
   message(FATAL_ERROR "capture stop failed: ${stop_error}${stop_output}")
+endif()
+
+execute_process(
+  COMMAND "${VEKTOR_EXECUTABLE}" replay execute
+          --config "${REPLAY_CONFIG}" --state-dir "${STATE_DIRECTORY}"
+          --replay-dir "${replay_directory}" --format json
+  RESULT_VARIABLE replay_result
+  OUTPUT_VARIABLE replay_output
+  ERROR_VARIABLE replay_error)
+if(NOT replay_result EQUAL 0 OR
+   NOT replay_output MATCHES "\"status\":\"completed\"" OR
+   NOT EXISTS "${replay_directory}/navigation-baseline-replay-001.yaml")
+  message(FATAL_ERROR "replay failed: ${replay_error}${replay_output}")
 endif()
 
 file(READ "${STATE_DIRECTORY}/navigation-baseline-001.yaml"
@@ -91,4 +106,4 @@ if(NOT export_result EQUAL 0 OR
 endif()
 
 file(REMOVE_RECURSE "${STATE_DIRECTORY}" "${artifact_directory}"
-     "${export_directory}")
+     "${export_directory}" "${replay_directory}")

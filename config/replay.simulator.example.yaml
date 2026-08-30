@@ -1,0 +1,18 @@
+schema_version: 1
+replay_id: navigation-simulator-replay-001
+source_run_id: navigation-baseline-001
+adapter: simulator
+ros_domain_id: 232
+timeout_seconds: 1800
+topic_remaps:
+  /cmd_vel: /vektor/replay/cmd_vel
+  /odom: /vektor/replay/odom
+simulator:
+  executable: /usr/local/bin/vektor-gazebo-replay
+  arguments:
+    - --bag
+    - ${bag_path}
+    - --source-run
+    - ${source_run_id}
+    - --output
+    - ${output_dir}

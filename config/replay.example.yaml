@@ -1,0 +1,9 @@
+schema_version: 1
+replay_id: navigation-baseline-replay-001
+source_run_id: navigation-baseline-001
+adapter: rosbag2
+ros_domain_id: 232
+timeout_seconds: 600
+topic_remaps:
+  /cmd_vel: /vektor/replay/cmd_vel
+  /odom: /vektor/replay/odom

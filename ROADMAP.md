@@ -248,7 +248,7 @@ Engineering scope:
   state
 - [x] Add `vektor compare` with stable machine-readable metric, parameter,
   event, and outcome differences between two runs
-- [ ] Add replay adapters that launch a captured run against an
+- [x] Add replay adapters that launch a captured run against an
   operator-selected simulator or rosbag2 playback environment
 - [ ] Add evaluation policies and an experiment manifest for scoring and ranking
   candidate configurations without automatically deploying a winner

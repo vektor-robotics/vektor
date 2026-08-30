@@ -81,6 +81,37 @@ minus baseline deltas when both values exist. Event comparison aggregates by
 type and message and compares counts, deliberately ignoring timestamps so
 equivalent events recorded at different times do not appear as changes.
 
+## Offline replay adapters
+
+Replay a completed, fingerprint-verified capture through rosbag2 in an isolated
+ROS domain:
+
+```bash
+vektor replay execute --config config/replay.example.yaml --format json
+```
+
+Replay definitions use schema version 1 and identify a unique replay, its
+completed source run, an adapter, a required ROS domain ID from 1–232, a bounded
+timeout, optional topic remaps, and optional rosbag2 QoS overrides. The rosbag2
+adapter always publishes simulated time with `--clock`, disables keyboard
+controls, and executes without a shell.
+
+The `simulator` adapter launches an operator-selected executable directly. Its
+bounded argument list may use `${bag_path}`, `${source_run_id}`, `${replay_id}`,
+`${ros_domain_id}`, and `${output_dir}` placeholders. See
+`config/replay.simulator.example.yaml`. VEKTOR sets `ROS_DOMAIN_ID` for the
+adapter process and forces `ROS_LOCALHOST_ONLY=1`, redirects its output to a
+private log, signals the entire adapter process group on timeout, and never
+issues actuator commands itself.
+
+Before launch, VEKTOR requires a completed source run with a rosbag2 artifact
+whose current SHA-256 fingerprint and byte count match the run manifest. Replay
+manifests are stored under `.vektor/replays` by default and retain the source
+OCI artifact, bag fingerprint, adapter version, exact argument vector, topic
+remaps, domain, localhost-only isolation, timestamps, status, exit code, and log
+path. Adapter failure or timeout returns exit code 1; invalid configuration or
+provenance returns 2.
+
 ## Redacted support bundle
 
 Create a fresh support directory with version metadata and a SHA-256 fingerprint
