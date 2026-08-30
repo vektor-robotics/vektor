@@ -112,6 +112,28 @@ remaps, domain, localhost-only isolation, timestamps, status, exit code, and log
 path. Adapter failure or timeout returns exit code 1; invalid configuration or
 provenance returns 2.
 
+## Explicit experiment scoring
+
+Rank a bounded set of completed candidate runs against a completed baseline:
+
+```bash
+vektor experiment score --config config/experiment.example.yaml --format json
+```
+
+Experiment definitions use schema version 1, name two to 32 candidate runs,
+and define one to 32 explicit metric policies. Each policy selects `minimize`
+or `maximize`, a positive weight and scale, and a non-negative tolerance. For
+each metric, VEKTOR computes candidate minus baseline and adds the normalized,
+direction-adjusted contribution to the candidate score. Ties are resolved by
+candidate ID so repeated scoring is deterministic.
+
+A required outcome can make failed or otherwise unsuitable runs ineligible;
+missing policy metrics also make a candidate ineligible. The retained manifest
+records baseline and candidate artifacts, parameters, outcomes, every metric
+contribution, rejection reasons, scores, and ranks. Results are advisory only:
+the manifest records `automatic_deployment: false`, and this command has no
+deployment path. Manifests are stored under `.vektor/experiments` by default.
+
 ## Redacted support bundle
 
 Create a fresh support directory with version metadata and a SHA-256 fingerprint

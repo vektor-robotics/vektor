@@ -4,6 +4,7 @@
 #include "vektor/capture.hpp"
 #include "vektor/comparison.hpp"
 #include "vektor/config.hpp"
+#include "vektor/evaluation.hpp"
 #include "vektor/fleet.hpp"
 #include "vektor/health_inspector.hpp"
 #include "vektor/replay.hpp"
@@ -34,6 +35,7 @@ struct CliOptions {
   std::string command;
   std::string capture_action;
   std::string replay_action;
+  std::string experiment_action;
   std::string config_path;
   std::string format{"text"};
   std::string validation_type;
@@ -65,6 +67,7 @@ struct CliOptions {
   std::optional<std::filesystem::path> authorization_policy;
   std::filesystem::path run_state_directory{".vektor/runs"};
   std::filesystem::path replay_directory{".vektor/replays"};
+  std::filesystem::path experiment_directory{".vektor/experiments"};
   std::string run_id;
   std::string baseline_run_id;
   std::string candidate_run_id;
@@ -120,6 +123,9 @@ struct CliOptions {
       << "  vektor replay execute --config <replay.yaml> "
          "[--state-dir <path>] [--replay-dir <path>] "
          "[--format text|json]\n"
+      << "  vektor experiment score --config <experiment.yaml> "
+         "[--state-dir <path>] [--experiment-dir <path>] "
+         "[--format text|json]\n"
       << "  vektor approval-payload --config <rollout.yaml> "
          "--wave <name> --identity <id>\n"
       << "                --issued-at <UTC> --expires-at <UTC>\n"
@@ -144,7 +150,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.command != "validate" && options.command != "support-bundle" &&
       options.command != "deploy" && options.command != "promote" &&
       options.command != "rollback" && options.command != "approval-payload" &&
-      options.command != "compare" && options.command != "replay")
+      options.command != "compare" && options.command != "replay" &&
+      options.command != "experiment")
     if (options.command != "capture")
       usage_error("unknown command '" + options.command + "'");
 
@@ -163,6 +170,13 @@ CliOptions parse_cli(int argc, char **argv) {
     options.replay_action = argv[2];
     if (options.replay_action != "execute")
       usage_error("replay requires execute");
+    first_option = 3;
+  } else if (options.command == "experiment") {
+    if (argc < 3)
+      usage_error("experiment requires score");
+    options.experiment_action = argv[2];
+    if (options.experiment_action != "score")
+      usage_error("experiment requires score");
     first_option = 3;
   }
 
@@ -237,6 +251,8 @@ CliOptions parse_cli(int argc, char **argv) {
       options.run_state_directory = next_value(index, argc, argv, argument);
     else if (argument == "--replay-dir")
       options.replay_directory = next_value(index, argc, argv, argument);
+    else if (argument == "--experiment-dir")
+      options.experiment_directory = next_value(index, argc, argv, argument);
     else if (argument == "--run-id")
       options.run_id = next_value(index, argc, argv, argument);
     else if (argument == "--baseline")
@@ -297,14 +313,16 @@ CliOptions parse_cli(int argc, char **argv) {
   const bool capture_command = options.command == "capture";
   const bool compare_command = options.command == "compare";
   const bool replay_command = options.command == "replay";
+  const bool experiment_command = options.command == "experiment";
   const bool has_run_options =
       options.run_state_directory != ".vektor/runs" ||
       options.replay_directory != ".vektor/replays" ||
+      options.experiment_directory != ".vektor/experiments" ||
       !options.run_id.empty() || !options.outcome.empty() ||
       !options.annotations.empty() || !options.run_metrics.empty() ||
       !options.baseline_run_id.empty() || !options.candidate_run_id.empty();
   if (!capture_command && !compare_command && !replay_command &&
-      has_run_options)
+      !experiment_command && has_run_options)
     usage_error("run option used with another command");
   if (capture_command) {
     if (!options.baseline_run_id.empty() || !options.candidate_run_id.empty())
@@ -351,6 +369,9 @@ CliOptions parse_cli(int argc, char **argv) {
         !options.approval_identity.empty() || !options.issued_at.empty() ||
         !options.expires_at.empty())
       usage_error("option is not supported by capture");
+    if (options.replay_directory != ".vektor/replays" ||
+        options.experiment_directory != ".vektor/experiments")
+      usage_error("directory option is not supported by capture");
     return options;
   }
   if (compare_command) {
@@ -376,6 +397,9 @@ CliOptions parse_cli(int argc, char **argv) {
         !options.approval_identity.empty() || !options.issued_at.empty() ||
         !options.expires_at.empty())
       usage_error("option is not supported by compare");
+    if (options.replay_directory != ".vektor/replays" ||
+        options.experiment_directory != ".vektor/experiments")
+      usage_error("directory option is not supported by compare");
     return options;
   }
   if (replay_command) {
@@ -402,6 +426,35 @@ CliOptions parse_cli(int argc, char **argv) {
         !options.approval_identity.empty() || !options.issued_at.empty() ||
         !options.expires_at.empty())
       usage_error("option is not supported by replay");
+    if (options.experiment_directory != ".vektor/experiments")
+      usage_error("--experiment-dir is not supported by replay");
+    return options;
+  }
+  if (experiment_command) {
+    if (options.config_path.empty())
+      usage_error("experiment score requires --config");
+    if (options.replay_directory != ".vektor/replays" ||
+        !options.run_id.empty() || !options.baseline_run_id.empty() ||
+        !options.candidate_run_id.empty() || !options.outcome.empty() ||
+        !options.annotations.empty() || !options.run_metrics.empty() ||
+        !options.output_directory.empty() || options.watch ||
+        !options.robot_id.empty() || !options.fleet_id.empty() ||
+        !options.workload_id.empty() || options.history_path ||
+        !options.history || options.insecure || options.tls_certificate ||
+        options.tls_private_key || options.tls_client_ca ||
+        !options.selectors.empty() || options.limit ||
+        options.deployment_state != ".vektor/deployment.yaml" ||
+        options.audit_log != ".vektor/audit.jsonl" ||
+        options.metrics != ".vektor/metrics.prom" ||
+        options.oci_runtime != "docker" ||
+        options.runtime_container != "vektor-workload" ||
+        options.trust_policy || options.authorization_policy ||
+        options.interval != std::chrono::milliseconds(5000) ||
+        options.listen_address != "127.0.0.1:50051" ||
+        !options.validation_type.empty() || !options.wave.empty() ||
+        !options.approval_identity.empty() || !options.issued_at.empty() ||
+        !options.expires_at.empty())
+      usage_error("option is not supported by experiment");
     return options;
   }
   if (options.config_path.empty())
@@ -760,6 +813,19 @@ int run_replay(const CliOptions &options) {
   return manifest.status == vektor::ReplayStatus::Completed ? 0 : 1;
 }
 
+int run_experiment(const CliOptions &options) {
+  const auto definition =
+      vektor::load_experiment_definition(options.config_path);
+  const vektor::RunStore store(options.run_state_directory);
+  const auto manifest =
+      vektor::score_experiment(definition, store, options.experiment_directory);
+  if (options.format == "json")
+    std::cout << vektor::experiment_manifest_to_json(manifest) << '\n';
+  else
+    vektor::print_experiment_manifest(manifest, std::cout);
+  return 0;
+}
+
 int run_support_bundle(const CliOptions &options) {
   vektor::create_support_bundle(
       options.output_directory, options.config_path,
@@ -781,6 +847,8 @@ int main(int argc, char **argv) {
       exit_code = run_compare(options);
     } else if (options.command == "replay") {
       exit_code = run_replay(options);
+    } else if (options.command == "experiment") {
+      exit_code = run_experiment(options);
     } else if (options.command == "validate") {
       exit_code = run_validate(options);
     } else if (options.command == "support-bundle") {

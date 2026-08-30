@@ -250,7 +250,7 @@ Engineering scope:
   event, and outcome differences between two runs
 - [x] Add replay adapters that launch a captured run against an
   operator-selected simulator or rosbag2 playback environment
-- [ ] Add evaluation policies and an experiment manifest for scoring and ranking
+- [x] Add evaluation policies and an experiment manifest for scoring and ranking
   candidate configurations without automatically deploying a winner
 - [ ] Prove the vertical slice on a reproducible ROS 2 testbed and retain the
   capture, comparison, replay, score, and real-world correlation evidence

@@ -1,0 +1,20 @@
+schema_version: 1
+experiment_id: navigation-controller-candidates-001
+baseline_run_id: navigation-baseline-001
+required_outcome: passed
+metrics:
+  - name: goal_error_m
+    objective: minimize
+    weight: 1.0
+    scale: 0.1
+    tolerance: 0.01
+  - name: elapsed_time_s
+    objective: minimize
+    weight: 0.25
+    scale: 10.0
+    tolerance: 0.5
+candidates:
+  - candidate_id: conservative-controller
+    run_id: navigation-candidate-001
+  - candidate_id: fast-controller
+    run_id: navigation-candidate-002
