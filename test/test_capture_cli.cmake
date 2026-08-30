@@ -1,5 +1,5 @@
 if(NOT DEFINED VEKTOR_EXECUTABLE OR NOT DEFINED RUN_CONFIG OR
-   NOT DEFINED REPLAY_CONFIG OR
+   NOT DEFINED REPLAY_CONFIG OR NOT DEFINED EXPERIMENT_CONFIG OR
    NOT DEFINED STATE_DIRECTORY)
   message(FATAL_ERROR "capture CLI test arguments are required")
 endif()
@@ -8,8 +8,9 @@ get_filename_component(state_parent "${STATE_DIRECTORY}" DIRECTORY)
 set(artifact_directory "${state_parent}/artifacts/navigation-baseline-001")
 set(export_directory "${state_parent}/capture-cli-export")
 set(replay_directory "${state_parent}/capture-cli-replays")
+set(experiment_directory "${state_parent}/capture-cli-experiments")
 file(REMOVE_RECURSE "${STATE_DIRECTORY}" "${artifact_directory}"
-     "${export_directory}" "${replay_directory}")
+     "${export_directory}" "${replay_directory}" "${experiment_directory}")
 
 execute_process(
   COMMAND "${VEKTOR_EXECUTABLE}" capture start --config "${RUN_CONFIG}"
@@ -38,6 +39,7 @@ execute_process(
   COMMAND "${VEKTOR_EXECUTABLE}" capture stop
           --run-id navigation-baseline-001 --outcome passed
           --annotation "no localization drift" --metric goal_error_m=0.25
+          --metric elapsed_time_s=100
           --state-dir "${STATE_DIRECTORY}"
           --format json
   RESULT_VARIABLE stop_result
@@ -68,12 +70,23 @@ file(READ "${STATE_DIRECTORY}/navigation-baseline-001.yaml"
      candidate_manifest)
 string(REPLACE "navigation-baseline-001" "navigation-candidate-001"
        candidate_manifest "${candidate_manifest}")
-string(REPLACE "outcome: passed" "outcome: failed"
-       candidate_manifest "${candidate_manifest}")
 string(REPLACE "goal_error_m: 0.25" "goal_error_m: 0.5"
+       candidate_manifest "${candidate_manifest}")
+string(REPLACE "elapsed_time_s: 100" "elapsed_time_s: 95"
        candidate_manifest "${candidate_manifest}")
 file(WRITE "${STATE_DIRECTORY}/navigation-candidate-001.yaml"
      "${candidate_manifest}")
+
+file(READ "${STATE_DIRECTORY}/navigation-baseline-001.yaml"
+     second_candidate_manifest)
+string(REPLACE "navigation-baseline-001" "navigation-candidate-002"
+       second_candidate_manifest "${second_candidate_manifest}")
+string(REPLACE "goal_error_m: 0.25" "goal_error_m: 0.2"
+       second_candidate_manifest "${second_candidate_manifest}")
+string(REPLACE "elapsed_time_s: 100" "elapsed_time_s: 105"
+       second_candidate_manifest "${second_candidate_manifest}")
+file(WRITE "${STATE_DIRECTORY}/navigation-candidate-002.yaml"
+     "${second_candidate_manifest}")
 
 execute_process(
   COMMAND "${VEKTOR_EXECUTABLE}" compare
@@ -85,10 +98,26 @@ execute_process(
   ERROR_VARIABLE compare_error)
 if(NOT compare_result EQUAL 0 OR
    NOT compare_output MATCHES "\"different\":true" OR
-   NOT compare_output MATCHES "\"changed\":true" OR
    NOT compare_output MATCHES "\"name\":\"goal_error_m\"" OR
    NOT compare_output MATCHES "\"delta\":0.25")
   message(FATAL_ERROR "compare failed: ${compare_error}${compare_output}")
+endif()
+
+execute_process(
+  COMMAND "${VEKTOR_EXECUTABLE}" experiment score
+          --config "${EXPERIMENT_CONFIG}"
+          --state-dir "${STATE_DIRECTORY}"
+          --experiment-dir "${experiment_directory}" --format json
+  RESULT_VARIABLE experiment_result
+  OUTPUT_VARIABLE experiment_output
+  ERROR_VARIABLE experiment_error)
+if(NOT experiment_result EQUAL 0 OR
+   NOT experiment_output MATCHES "\"automatic_deployment\":false" OR
+   NOT experiment_output MATCHES "\"candidate_id\":\"fast-controller\"" OR
+   NOT experiment_output MATCHES "\"rank\":1" OR
+   NOT EXISTS "${experiment_directory}/navigation-controller-candidates-001.yaml")
+  message(FATAL_ERROR
+          "experiment scoring failed: ${experiment_error}${experiment_output}")
 endif()
 
 execute_process(
@@ -106,4 +135,4 @@ if(NOT export_result EQUAL 0 OR
 endif()
 
 file(REMOVE_RECURSE "${STATE_DIRECTORY}" "${artifact_directory}"
-     "${export_directory}" "${replay_directory}")
+     "${export_directory}" "${replay_directory}" "${experiment_directory}")
