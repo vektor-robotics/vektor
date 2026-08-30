@@ -147,7 +147,7 @@ target_link_libraries(vektor_rollout
 )
 
 add_library(vektor_validation src/run.cpp src/capture.cpp src/run_events.cpp
-  src/comparison.cpp)
+  src/comparison.cpp src/replay.cpp)
 target_include_directories(vektor_validation PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -241,6 +241,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_run test/test_run.cpp)
   target_link_libraries(test_run vektor_validation)
 
+  ament_add_gtest(test_replay test/test_replay.cpp)
+  target_link_libraries(test_replay vektor_validation)
+
   add_test(NAME test_validate_cli
     COMMAND $<TARGET_FILE:vektor> validate --type health
       --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml --format json)
@@ -257,6 +260,7 @@ if(BUILD_TESTING)
     COMMAND ${CMAKE_COMMAND}
       -DVEKTOR_EXECUTABLE=$<TARGET_FILE:vektor>
       -DRUN_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/run.example.yaml
+      -DREPLAY_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/replay.example.yaml
       -DSTATE_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/capture-cli-state
       -P ${CMAKE_CURRENT_SOURCE_DIR}/test/test_capture_cli.cmake)
 
