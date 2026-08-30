@@ -39,6 +39,48 @@ vektor validate --type trust --config config/trust.example.yaml
 JSON output is schema 1 and contains `valid` and `type`; validation failures
 return exit code 2 with the parser's field-specific error.
 
+## Validation run manifests
+
+Start a local validation run from a versioned definition, inspect its exact
+provenance, and close it with an outcome and optional annotations:
+
+```bash
+vektor capture start --config config/run.example.yaml --format json
+vektor capture show --run-id navigation-baseline-001
+vektor capture stop --run-id navigation-baseline-001 --outcome passed \
+  --annotation "no localization drift" --metric goal_error_m=0.125
+vektor capture export --run-id navigation-baseline-001 \
+  --output /tmp/navigation-baseline-001
+vektor compare --baseline navigation-baseline-001 \
+  --candidate navigation-candidate-001 --format json
+```
+
+Run manifests use schema version 1 and bind a run to a digest-pinned OCI
+artifact, workload, VEKTOR policy path and computed SHA-256 fingerprint,
+flattened ROS parameter snapshot, environment metadata, robot, operator, and
+UTC start/stop timestamps. A definition selects 1–64 explicit ROS topics and a
+rosbag2 storage plugin. `capture start` launches `ros2 bag record` without a
+shell; `capture stop` sends bounded shutdown signals and records the resulting
+bag directory as an external artifact with a deterministic SHA-256 fingerprint
+and byte count. Manifests stay under `.vektor/runs` and bags under
+`.vektor/artifacts`; use `--state-dir` to relocate the state root. `capture export`
+writes portable YAML and JSON metadata without copying unbounded bag
+data. Each run definition also identifies the bounded health-history and
+append-only deployment-audit sources. At start, VEKTOR records the audit byte
+offset; at stop, it imports only new deployment events and health-state
+transitions timestamped within the run. Reads are capped at 1 MiB per source
+and the combined imported-event limit is configurable from 1 to 1,024
+(default 256). Source rotation, truncation, and malformed records become
+manifest warning events instead of making sensor or log data unbounded.
+
+`capture stop --metric name=value` persists up to 256 finite numeric metrics
+using stable names. `vektor compare` requires two completed runs and emits
+deterministically ordered text or schema-versioned JSON differences for
+outcome, parameters, metrics, and events. Metric entries include candidate
+minus baseline deltas when both values exist. Event comparison aggregates by
+type and message and compares counts, deliberately ignoring timestamps so
+equivalent events recorded at different times do not appear as changes.
+
 ## Redacted support bundle
 
 Create a fresh support directory with version metadata and a SHA-256 fingerprint

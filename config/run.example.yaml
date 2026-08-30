@@ -1,0 +1,23 @@
+schema_version: 1
+run_id: navigation-baseline-001
+name: Navigation baseline
+artifact: ghcr.io/example/navigation@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+workload_id: navigation
+policy: example.yaml
+parameters:
+  controller.max_velocity: "0.5"
+  planner.tolerance: "0.2"
+environment:
+  site: simulation-lab
+  scenario: warehouse-a
+topics:
+  - /tf
+  - /tf_static
+  - /odom
+storage_id: sqlite3
+event_sources:
+  health_history: ../.vektor/status.jsonl
+  deployment_audit: ../.vektor/audit.jsonl
+  max_events: 256
+robot_id: sim-robot-01
+operator: operator@example.com

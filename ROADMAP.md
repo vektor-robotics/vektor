@@ -239,14 +239,14 @@ Customer evidence runs in parallel with implementation:
 
 Engineering scope:
 
-- [ ] Define a versioned run manifest linking the exact OCI digest, workload,
+- [x] Define a versioned run manifest linking the exact OCI digest, workload,
   VEKTOR policy, ROS parameters, environment metadata, operator, and timestamps
-- [ ] Add `vektor capture start`, `stop`, `show`, and `export` around a bounded,
+- [x] Add `vektor capture start`, `stop`, `show`, and `export` around a bounded,
   configurable ROS 2 telemetry and rosbag2 integration
-- [ ] Persist run outcomes, health transitions, deployment events, and
+- [x] Persist run outcomes, health transitions, deployment events, and
   user-supplied annotations without embedding unbounded sensor data in agent
   state
-- [ ] Add `vektor compare` with stable machine-readable metric, parameter,
+- [x] Add `vektor compare` with stable machine-readable metric, parameter,
   event, and outcome differences between two runs
 - [ ] Add replay adapters that launch a captured run against an
   operator-selected simulator or rosbag2 playback environment

@@ -146,13 +146,21 @@ target_link_libraries(vektor_rollout
   Threads::Threads
 )
 
+add_library(vektor_validation src/run.cpp src/capture.cpp src/run_events.cpp
+  src/comparison.cpp)
+target_include_directories(vektor_validation PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(vektor_validation vektor_deployment yaml-cpp)
+
 add_executable(vektor src/main.cpp)
 target_link_libraries(vektor
-  vektor_core vektor_agent vektor_fleet vektor_rollout)
+  vektor_core vektor_agent vektor_fleet vektor_rollout vektor_validation)
 ament_target_dependencies(vektor rclcpp)
 
 install(TARGETS vektor vektor_core vektor_agent vektor_deployment vektor_fleet
-  vektor_rollout vektor_proto
+  vektor_rollout vektor_validation vektor_proto
   EXPORT vektor_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -230,6 +238,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_rollout vektor_rollout vektor_agent
     vektor_deployment vektor_proto gRPC::grpc++)
 
+  ament_add_gtest(test_run test/test_run.cpp)
+  target_link_libraries(test_run vektor_validation)
+
   add_test(NAME test_validate_cli
     COMMAND $<TARGET_FILE:vektor> validate --type health
       --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml --format json)
@@ -241,6 +252,13 @@ if(BUILD_TESTING)
       --config ${CMAKE_CURRENT_SOURCE_DIR}/config/example.yaml)
   set_tests_properties(test_validate_cli_rejects_unknown_type PROPERTIES
     WILL_FAIL TRUE)
+
+  add_test(NAME test_capture_cli
+    COMMAND ${CMAKE_COMMAND}
+      -DVEKTOR_EXECUTABLE=$<TARGET_FILE:vektor>
+      -DRUN_CONFIG=${CMAKE_CURRENT_SOURCE_DIR}/config/run.example.yaml
+      -DSTATE_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/capture-cli-state
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/test/test_capture_cli.cmake)
 
   add_test(NAME test_ubuntu_packaging
     COMMAND ${CMAKE_COMMAND} -P
