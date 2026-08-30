@@ -53,6 +53,27 @@ bool process_exited(pid_t pid) {
   if (errno != ECHILD)
     throw std::runtime_error("failed to inspect recorder process: " +
                              std::string(std::strerror(errno)));
+
+  // Capture start and stop may be invoked by different CLI processes. In that
+  // case the recorder is not our child, and a container without an init process
+  // can leave the terminated recorder as a zombie indefinitely. kill(pid, 0)
+  // still succeeds for zombies, so inspect the proc state before using it as a
+  // liveness check.
+  std::ifstream process_stat("/proc/" + std::to_string(pid) + "/stat");
+  if (!process_stat) {
+    if (kill(pid, 0) != 0 && errno == ESRCH)
+      return true;
+    throw std::runtime_error("cannot inspect recorder process state");
+  }
+  std::string stat;
+  std::getline(process_stat, stat);
+  const auto command_end = stat.rfind(')');
+  if (command_end == std::string::npos || command_end + 2 >= stat.size())
+    throw std::runtime_error("failed to parse recorder process state");
+  const auto process_state = stat[command_end + 2];
+  if (process_state == 'Z' || process_state == 'X')
+    return true;
+
   if (kill(pid, 0) == 0 || errno == EPERM)
     return false;
   if (errno == ESRCH)
