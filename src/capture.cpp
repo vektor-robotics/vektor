@@ -115,6 +115,22 @@ void digest_update(EVP_MD_CTX *context, const void *data, std::size_t size) {
   if (EVP_DigestUpdate(context, data, size) != 1)
     throw std::runtime_error("failed to fingerprint capture artifact");
 }
+
+void report_launch_error(int fd, int error) noexcept {
+  const auto *data = reinterpret_cast<const unsigned char *>(&error);
+  std::size_t remaining = sizeof(error);
+  while (remaining > 0) {
+    const auto count = write(fd, data, remaining);
+    if (count > 0) {
+      data += count;
+      remaining -= static_cast<std::size_t>(count);
+      continue;
+    }
+    if (count < 0 && errno == EINTR)
+      continue;
+    return;
+  }
+}
 } // namespace
 
 RosbagRecorder::RosbagRecorder(std::filesystem::path executable)
@@ -154,7 +170,7 @@ RosbagRecorder::start(const std::filesystem::path &bag_path,
     close(error_pipe[0]);
     if (setsid() < 0) {
       const auto error = errno;
-      static_cast<void>(write(error_pipe[1], &error, sizeof(error)));
+      report_launch_error(error_pipe[1], error);
       _exit(127);
     }
     const int log =
@@ -162,7 +178,7 @@ RosbagRecorder::start(const std::filesystem::path &bag_path,
     if (log < 0 || dup2(log, STDOUT_FILENO) < 0 ||
         dup2(log, STDERR_FILENO) < 0) {
       const auto error = errno;
-      static_cast<void>(write(error_pipe[1], &error, sizeof(error)));
+      report_launch_error(error_pipe[1], error);
       _exit(127);
     }
     if (log != STDOUT_FILENO && log != STDERR_FILENO)
@@ -170,7 +186,7 @@ RosbagRecorder::start(const std::filesystem::path &bag_path,
     const int null_input = open("/dev/null", O_RDONLY | O_CLOEXEC);
     if (null_input < 0 || dup2(null_input, STDIN_FILENO) < 0) {
       const auto error = errno;
-      static_cast<void>(write(error_pipe[1], &error, sizeof(error)));
+      report_launch_error(error_pipe[1], error);
       _exit(127);
     }
     if (null_input != STDIN_FILENO)
@@ -187,7 +203,7 @@ RosbagRecorder::start(const std::filesystem::path &bag_path,
     argv.push_back(nullptr);
     execvp(executable_.c_str(), argv.data());
     const auto error = errno;
-    static_cast<void>(write(error_pipe[1], &error, sizeof(error)));
+    report_launch_error(error_pipe[1], error);
     _exit(127);
   }
 
