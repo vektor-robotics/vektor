@@ -15,7 +15,9 @@ TEST(SupportBundle, WritesOnlyFingerprintMetadata) {
   vektor::create_support_bundle(output, config, history, metrics);
   std::ifstream manifest(output / "manifest.txt");
   const std::string text((std::istreambuf_iterator<char>(manifest)), {});
-  EXPECT_NE(text.find("health_config_sha256:"), std::string::npos);
+  EXPECT_NE(text.find("health_config_sha256: "
+                      "c61e7a850043336b00c3d2319e11d84739925df07a9b5735fe703dac06cbb6e8"),
+            std::string::npos);
   EXPECT_EQ(text.find("do-not-copy"), std::string::npos);
   EXPECT_FALSE(std::filesystem::exists(output / "policy.yaml"));
   EXPECT_TRUE(std::filesystem::exists(output / "status-history.jsonl"));
