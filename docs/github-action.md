@@ -36,6 +36,11 @@ jobs:
 The Action writes a Markdown summary to the GitHub job summary and uploads the
 complete evidence directory as an artifact.
 
+A minimal public demo repository is available at
+`https://github.com/nahid633/vektor-action-demo`. It runs the built-in testbed
+from a separate repository and proves that an external project can consume
+VEKTOR through GitHub Actions.
+
 ## Custom Command
 
 Use `mode: custom` when a repository already has a simulator, test publisher,
