@@ -84,7 +84,9 @@ runs:
       working-directory: ${{ github.action_path }}
       run: |
         set -euo pipefail
+        set +u
         source /opt/ros/jazzy/setup.bash
+        set -u
         colcon build --event-handlers console_direct+ \
           --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
@@ -94,8 +96,10 @@ runs:
       working-directory: ${{ github.action_path }}
       run: |
         set -euo pipefail
+        set +u
         source /opt/ros/jazzy/setup.bash
         source install/setup.bash
+        set -u
         if [[ -e "${VEKTOR_ACTION_EVIDENCE_DIR}" ]]; then
           echo "evidence directory already exists: ${VEKTOR_ACTION_EVIDENCE_DIR}" >&2
           exit 2
@@ -113,8 +117,10 @@ runs:
           echo "mode=custom requires the command input." >&2
           exit 2
         fi
+        set +u
         source /opt/ros/jazzy/setup.bash
         source "${VEKTOR_ACTION_SOURCE_DIR}/install/setup.bash"
+        set -u
         mkdir -p "${VEKTOR_ACTION_EVIDENCE_DIR}"
         cd "${GITHUB_WORKSPACE}"
         bash -lc "${VEKTOR_ACTION_COMMAND}"
