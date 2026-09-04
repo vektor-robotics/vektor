@@ -144,29 +144,39 @@ git_environment.update({
     "GIT_CONFIG_KEY_0": "safe.directory",
     "GIT_CONFIG_VALUE_0": str(repository),
 })
+
+def git_output(*args):
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(repository), *args],
+            env=git_environment,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ""
+
 comparison = json.loads((root / "outputs/comparison.json").read_text())
 replay = json.loads((root / "outputs/replay.json").read_text())
 experiment = json.loads((root / "outputs/experiment.json").read_text())
-summary = {
-    "schema_version": 1,
-    "testbed": "bounded-ros2-publisher",
-    "repository_commit": subprocess.check_output(
-        ["git", "-C", str(repository), "rev-parse", "HEAD"],
-        env=git_environment,
-        text=True,
-    ).strip(),
-    "repository_dirty": (
+repository_commit = git_output("rev-parse", "HEAD") or os.environ.get(
+    "GITHUB_ACTION_REF"
+) or os.environ.get("GITHUB_SHA") or "unknown"
+repository_dirty = False
+if git_output("rev-parse", "--is-inside-work-tree") == "true":
+    repository_dirty = (
         subprocess.run(
             ["git", "-C", str(repository), "diff", "--quiet", "--ignore-space-at-eol"],
             check=False,
             env=git_environment,
         ).returncode != 0
-        or bool(subprocess.check_output(
-            ["git", "-C", str(repository), "ls-files", "--others", "--exclude-standard"],
-            env=git_environment,
-            text=True,
-        ).strip())
-    ),
+        or bool(git_output("ls-files", "--others", "--exclude-standard"))
+    )
+summary = {
+    "schema_version": 1,
+    "testbed": "bounded-ros2-publisher",
+    "repository_commit": repository_commit,
+    "repository_dirty": repository_dirty,
     "platform": platform.platform(),
     "capture_domain_id": 230,
     "replay_domain_id": 231,

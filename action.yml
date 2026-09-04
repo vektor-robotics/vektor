@@ -1,0 +1,163 @@
+name: VEKTOR Robot Validation
+description: Build VEKTOR, run robot-run validation evidence, and publish a PR/job summary.
+
+inputs:
+  mode:
+    description: "Validation mode: testbed or custom."
+    required: false
+    default: testbed
+  evidence-directory:
+    description: "Directory for retained VEKTOR evidence. Defaults to a runner temp directory."
+    required: false
+    default: ""
+  install-dependencies:
+    description: "Install VEKTOR build dependencies with apt and rosdep."
+    required: false
+    default: "true"
+  build:
+    description: "Build VEKTOR before running validation."
+    required: false
+    default: "true"
+  command:
+    description: "Custom validation command for mode=custom. Runs from the caller repository."
+    required: false
+    default: ""
+  artifact-name:
+    description: "Name for the uploaded evidence artifact."
+    required: false
+    default: vektor-evidence
+  upload-artifact:
+    description: "Upload the evidence directory as a GitHub Actions artifact."
+    required: false
+    default: "true"
+
+outputs:
+  evidence-directory:
+    description: "Directory containing retained validation evidence."
+    value: ${{ steps.paths.outputs.evidence-directory }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        evidence_directory="${{ inputs.evidence-directory }}"
+        if [[ -z "${evidence_directory}" ]]; then
+          evidence_directory="${RUNNER_TEMP:-/tmp}/vektor-evidence-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+        fi
+        echo "evidence-directory=${evidence_directory}" >>"${GITHUB_OUTPUT}"
+        echo "VEKTOR_ACTION_EVIDENCE_DIR=${evidence_directory}" >>"${GITHUB_ENV}"
+        echo "VEKTOR_ACTION_SOURCE_DIR=${GITHUB_ACTION_PATH}" >>"${GITHUB_ENV}"
+        echo "VEKTOR_EXECUTABLE=${GITHUB_ACTION_PATH}/install/vektor/lib/vektor/vektor" >>"${GITHUB_ENV}"
+
+    - name: Check ROS 2 Jazzy environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! -f /opt/ros/jazzy/setup.bash ]]; then
+          echo "VEKTOR Action requires ROS 2 Jazzy. Run this job in container ros:jazzy-ros-base-noble or install ROS 2 Jazzy first." >&2
+          exit 2
+        fi
+
+    - name: Install dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        apt_get=(apt-get)
+        if [[ "$(id -u)" != "0" ]]; then
+          apt_get=(sudo apt-get)
+        fi
+        "${apt_get[@]}" update
+        "${apt_get[@]}" install -y ros-dev-tools libyaml-cpp-dev libprotobuf-dev \
+          protobuf-compiler libgrpc++-dev protobuf-compiler-grpc git python3
+        rosdep update
+        rosdep install --from-paths . --ignore-src -r -y --skip-keys grpc
+
+    - name: Build VEKTOR
+      if: ${{ inputs.build == 'true' }}
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        set +u
+        source /opt/ros/jazzy/setup.bash
+        set -u
+        colcon build --event-handlers console_direct+ \
+          --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+    - name: Run validation testbed
+      if: ${{ inputs.mode == 'testbed' }}
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        set +u
+        source /opt/ros/jazzy/setup.bash
+        source install/setup.bash
+        set -u
+        if [[ -e "${VEKTOR_ACTION_EVIDENCE_DIR}" ]]; then
+          echo "evidence directory already exists: ${VEKTOR_ACTION_EVIDENCE_DIR}" >&2
+          exit 2
+        fi
+        scripts/run-validation-testbed.sh "${VEKTOR_ACTION_EVIDENCE_DIR}"
+
+    - name: Run custom validation command
+      if: ${{ inputs.mode == 'custom' }}
+      shell: bash
+      env:
+        VEKTOR_ACTION_COMMAND: ${{ inputs.command }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${VEKTOR_ACTION_COMMAND}" ]]; then
+          echo "mode=custom requires the command input." >&2
+          exit 2
+        fi
+        set +u
+        source /opt/ros/jazzy/setup.bash
+        source "${VEKTOR_ACTION_SOURCE_DIR}/install/setup.bash"
+        set -u
+        mkdir -p "${VEKTOR_ACTION_EVIDENCE_DIR}"
+        cd "${GITHUB_WORKSPACE}"
+        bash -lc "${VEKTOR_ACTION_COMMAND}"
+
+    - name: Write validation summary
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "## VEKTOR Robot Validation"
+          echo
+          echo "- Mode: \`${{ inputs.mode }}\`"
+          echo "- Evidence: \`${VEKTOR_ACTION_EVIDENCE_DIR}\`"
+        } >>"${GITHUB_STEP_SUMMARY}"
+        if [[ -f "${VEKTOR_ACTION_EVIDENCE_DIR}/summary.json" ]]; then
+          python3 - "${VEKTOR_ACTION_EVIDENCE_DIR}/summary.json" >>"${GITHUB_STEP_SUMMARY}" <<'PY'
+        import json
+        import sys
+
+        summary = json.load(open(sys.argv[1], encoding="utf-8"))
+        print(f"- Scope: `{summary.get('evidence_scope', 'unknown')}`")
+        print(f"- Commit: `{summary.get('repository_commit', 'unknown')}`")
+        print(f"- Replay status: `{summary.get('replay_status', 'unknown')}`")
+        print(f"- Replayed messages: `{summary.get('replayed_messages', 'unknown')}/{summary.get('source_messages', 'unknown')}`")
+        print(f"- Comparison detected difference: `{summary.get('comparison_detected_difference', 'unknown')}`")
+        print(f"- Top candidate: `{summary.get('top_candidate', 'unknown')}`")
+        print(f"- Automatic deployment: `{summary.get('automatic_deployment', 'unknown')}`")
+        PY
+        else
+          echo "- Summary JSON: not found at \`${VEKTOR_ACTION_EVIDENCE_DIR}/summary.json\`" >>"${GITHUB_STEP_SUMMARY}"
+        fi
+
+    - name: Upload evidence artifact
+      if: ${{ always() && inputs.upload-artifact == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.paths.outputs.evidence-directory }}
+        if-no-files-found: warn
