@@ -146,6 +146,27 @@ summary. See [the validation testbed guide](docs/validation-testbed.md). The
 testbed is simulated evidence and does not satisfy the separate physical
 correlation gate.
 
+## GitHub Action
+
+Use the VEKTOR GitHub Action to let ROS 2 projects run validation evidence in
+CI and attach a retained evidence artifact to pull requests. The first public
+mode runs the built-in simulated validation testbed; project-specific workflows
+can provide a custom command that uses the built `VEKTOR_EXECUTABLE`.
+
+```yaml
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base-noble
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vektor-robotics/vektor@main
+        with:
+          mode: testbed
+```
+
+See [the GitHub Action guide](docs/github-action.md).
+
 ## Redacted support bundle
 
 Create a fresh support directory with version metadata and a SHA-256 fingerprint

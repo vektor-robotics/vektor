@@ -1,0 +1,25 @@
+name: GitHub Action smoke test
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - .github/workflows/action-smoke.yaml
+      - docs/github-action.md
+      - scripts/run-validation-testbed.sh
+  workflow_dispatch:
+
+jobs:
+  action-smoke:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base-noble
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Run local VEKTOR Action
+        uses: ./
+        with:
+          mode: testbed
+          artifact-name: vektor-action-smoke-evidence
