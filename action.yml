@@ -1,5 +1,9 @@
 name: VEKTOR Robot Validation
 description: Build VEKTOR, run robot-run validation evidence, and publish a PR/job summary.
+author: vektor-robotics
+branding:
+  icon: activity
+  color: blue
 
 inputs:
   mode:
