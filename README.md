@@ -1,22 +1,75 @@
 # VEKTOR
 
-Safe software delivery for autonomous machines.
+Open-source tooling for reproducible robot testing and software delivery.
 
-VEKTOR is an open-source, health-aware deployment tool for ROS 2 fleets.
-`vektor check` validates a live ROS graph, `vektor status` produces a
-timestamped machine-health snapshot, `vektor agent` serves health and deployment
-operations over gRPC, `vektor fleet` aggregates selected machines, and the
-deployment commands run health-gated OCI rollouts with durable audit events.
+VEKTOR helps ROS 2 teams capture real robot runs together with the software,
+configuration, parameters, telemetry, and outcomes that produced them.
+
+The basic workflow is simple:
+
+```text
+capture baseline
+      ↓
+change software or configuration
+      ↓
+capture candidate
+      ↓
+compare runs
+```
+
+A run can include selected ROS topics, parameter snapshots, deployment
+provenance, health events, environment metadata, operator notes, and
+task-specific metrics.
+
+For example:
+
+```bash
+vektor capture start --config config/run.example.yaml
+
+# run the robot
+
+vektor capture stop \
+  --run-id navigation-baseline-001 \
+  --outcome passed \
+  --metric goal_error_m=0.125
+
+# make a software or configuration change and capture another run
+
+vektor compare \
+  --baseline navigation-baseline-001 \
+  --candidate navigation-candidate-001
+```
+
+VEKTOR can also replay captured rosbag2 data in an isolated ROS domain and
+score candidate runs using explicitly configured metrics.
+
+The project started as tooling for safer ROS 2 software delivery, so it also
+includes live health checks, machine status snapshots, fleet inspection,
+health-gated OCI deployments, rollback, authorization, and audit records.
+
+## What VEKTOR does not do
+
+VEKTOR does not automatically diagnose why a robot failed.
+
+It does not replace simulation, formal safety analysis, or certification.
+
+Run comparison works on the parameters, metrics, outcomes, and events supplied
+or captured by the workflow. Experiment scoring is advisory and never triggers
+automatic deployment.
+
+The current focus is making physical robot experiments easier to reproduce,
+compare, and trace back to the exact software and configuration that produced
+them.
 
 ## Milestone 1 checks
 
-- Required node presence
-- Topic existence
-- Topic frequency over a configurable sampling window
-- Per-topic reliable or best-effort QoS
-- TF connectivity between two frames
-- Managed-node lifecycle state through `/<node>/get_state`
-- Text or machine-readable JSON output
+* Required node presence
+* Topic existence
+* Topic frequency over a configurable sampling window
+* Per-topic reliable or best-effort QoS
+* TF connectivity between two frames
+* Managed-node lifecycle state through `/<node>/get_state`
+* Text or machine-readable JSON output
 
 The check exits `0` only when every configured check passes, `1` when a health check fails, and `2` for invalid CLI/configuration errors.
 
@@ -201,8 +254,8 @@ the policy.
 The agent runs the same health policy continuously and exposes two versioned
 gRPC methods:
 
-- `GetStatus` returns the latest snapshot.
-- `WatchStatus` streams each new snapshot as it is published.
+* `GetStatus` returns the latest snapshot.
+* `WatchStatus` streams each new snapshot as it is published.
 
 For local development, insecure transport must be requested explicitly and is
 restricted to loopback or Unix sockets:
@@ -261,12 +314,12 @@ identities:
       workloads: ['*']
 ```
 
-| Role | Inspect | Deploy | Promote | Roll back |
-| --- | --- | --- | --- | --- |
-| `viewer` | yes | no | no | no |
-| `deployer` | yes | yes | yes | no |
-| `operator` | yes | yes | yes | yes |
-| `admin` | yes | yes | yes | yes |
+| Role       | Inspect | Deploy | Promote | Roll back |
+| ---------- | ------- | ------ | ------- | --------- |
+| `viewer`   | yes     | no     | no      | no        |
+| `deployer` | yes     | yes    | yes     | no        |
+| `operator` | yes     | yes    | yes     | yes       |
+| `admin`    | yes     | yes    | yes     | yes       |
 
 `GetStatus`, `WatchStatus`, and `GetDeployment` require `inspect`;
 `PrepareDeployment`, `ActivateDeployment`, and `RollbackDeployment` require
